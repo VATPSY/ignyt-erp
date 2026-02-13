@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quality Checks</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="quality_checks">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Quality Checks</h1>
+          <p class="subtitle">Central view of QC logs across the factory.</p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>First Part Check Logs</h2>
+            <p class="hint">Assembly line first part checks.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="First part check logs">
+          <div class="table-row table-head" role="row">
+            <span>SKU</span>
+            <span>Item</span>
+            <span>Status</span>
+            <span>Date</span>
+          </div>
+          <div id="first-part-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Raw Material QC Logs</h2>
+            <p class="hint">Passed and rejected quantities from raw material QC.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Raw material QC logs">
+          <div class="table-row table-head" role="row">
+            <span>Material</span>
+            <span>Rejected Qty</span>
+            <span>QC By</span>
+            <span>Date</span>
+          </div>
+          <div id="raw-qc-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Dispatch QC Logs</h2>
+            <p class="hint">Rejected pieces captured during dispatch QC.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Dispatch QC logs">
+          <div class="table-row table-head" role="row">
+            <span>Item</span>
+            <span>Rejected Qty</span>
+            <span>QC By</span>
+            <span>Date</span>
+          </div>
+          <div id="dispatch-qc-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const firstPartKey = "first_part_qc_log";
+      const rawRejectedKey = "raw_material_rejected_log";
+      const dispatchRejectedKey = "final_good_rejected_log";
+
+      const firstPartBody = document.getElementById("first-part-body");
+      const rawQcBody = document.getElementById("raw-qc-body");
+      const dispatchQcBody = document.getElementById("dispatch-qc-body");
+
+      const renderLog = (key, target, emptyMessage, columns) => {
+        let entries = [];
+        try {
+          const raw = localStorage.getItem(key);
+          entries = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          entries = [];
+        }
+
+        target.innerHTML = "";
+        if (!entries.length) {
+          target.innerHTML = `<p class="hint">${emptyMessage}</p>`;
+          return;
+        }
+
+        entries.forEach((entry, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          columns.forEach((col) => {
+            const value = entry[col] ?? "";
+            const cell = document.createElement("input");
+            cell.value = value;
+            cell.readOnly = true;
+            row.appendChild(cell);
+          });
+
+          target.appendChild(row);
+        });
+      };
+
+      renderLog(firstPartKey, firstPartBody, "No first part checks logged.", [
+        "sku",
+        "item",
+        "status",
+        "date",
+      ]);
+      renderLog(rawRejectedKey, rawQcBody, "No raw material QC logs yet.", [
+        "material",
+        "qty",
+        "qc_by",
+        "date",
+      ]);
+      renderLog(dispatchRejectedKey, dispatchQcBody, "No dispatch QC logs yet.", [
+        "name",
+        "qty",
+        "qc",
+        "date",
+      ]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Profile Settings</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="profile_settings">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Profile Settings</h1>
+          <p class="subtitle">Create users and control module access.</p>
+        </div>
+        <form method="post" action="/logout">
+          <button class="ghost" type="submit">Logout</button>
+        </form>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <div class="table-header">
+          <div>
+            <h2>Create User</h2>
+            <p class="hint">Add a new user and assign access modules.</p>
+          </div>
+        </div>
+        <form id="create-user" class="add-form">
+          <div class="field">
+            <label for="new-username">Username</label>
+            <input id="new-username" type="text" required />
+          </div>
+          <div class="field">
+            <label for="new-password">Password</label>
+            <input id="new-password" type="password" required />
+          </div>
+          <button class="primary" type="submit">Create</button>
+        </form>
+        <div id="create-status" class="status" role="status"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>User Access</h2>
+            <p class="hint">Set Read/Write access and reset passwords.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="users-status" class="status" role="status" aria-live="polite"></div>
+        <div id="users-list" class="users-list"></div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const modules = [
+        { key: "final_good_store", label: "Final Good Store" },
+        { key: "raw_material_store", label: "Raw Material Store" },
+        { key: "purchase_department", label: "Purchase Department" },
+        { key: "boms", label: "BOMs" },
+        { key: "quality_checks", label: "Quality Checks" },
+        { key: "production_reports", label: "Production Reports" },
+        { key: "purchase_order_generator", label: "Purchase Order Generator" },
+        { key: "orders", label: "Orders" },
+        { key: "production_manager", label: "Production Manager" },
+        { key: "assembly_line", label: "Assembly Line" },
+        { key: "packaging", label: "Packaging" },
+        { key: "profile_settings", label: "Profile Settings" },
+      ];
+
+
+      const createForm = document.getElementById("create-user");
+      const createStatus = document.getElementById("create-status");
+      const usersList = document.getElementById("users-list");
+      const usersStatus = document.getElementById("users-status");
+      const refreshButton = document.getElementById("refresh");
+
+      let currentUser = null;
+
+      const setStatus = (el, message, type = "info") => {
+        el.textContent = message;
+        el.dataset.type = type;
+        el.classList.toggle("visible", Boolean(message));
+      };
+
+      const fetchMe = async () => {
+        const response = await fetch("/api/me");
+        if (!response.ok) return null;
+        return response.json();
+      };
+
+      const fetchUsers = async () => {
+        const response = await fetch("/api/users");
+        if (!response.ok) throw new Error("Unable to load users");
+        return response.json();
+      };
+
+      const permissionFor = (permissions, key) => {
+        if (permissions.includes("*")) return "write";
+        if (permissions.includes(`${key}:write`)) return "write";
+        if (permissions.includes(`${key}:read`)) return "read";
+        return "none";
+      };
+
+      const renderUsers = (users) => {
+        usersList.innerHTML = "";
+        users.forEach((user) => {
+          const card = document.createElement("div");
+          card.className = "panel";
+
+          const header = document.createElement("div");
+          header.className = "table-header";
+          header.innerHTML = `<div><h3>${user.username}</h3></div>`;
+
+
+          const permsWrap = document.createElement("div");
+          permsWrap.className = "dashboard-grid";
+
+          modules.forEach((module) => {
+            const wrapper = document.createElement("div");
+            wrapper.style.display = "grid";
+            wrapper.style.gap = "6px";
+            const label = document.createElement("strong");
+            label.textContent = module.label;
+            wrapper.appendChild(label);
+
+            const current = permissionFor(user.permissions, module.key);
+
+            ["read", "write", "none"].forEach((mode) => {
+              const line = document.createElement("label");
+              line.style.display = "flex";
+              line.style.alignItems = "center";
+              line.style.gap = "6px";
+              const radio = document.createElement("input");
+              radio.type = "radio";
+              radio.name = `${user.id}-${module.key}`;
+              radio.value = mode;
+              radio.checked = current === mode;
+              line.appendChild(radio);
+              const text = document.createElement("span");
+              text.textContent = mode.toUpperCase();
+              line.appendChild(text);
+              wrapper.appendChild(line);
+            });
+
+            permsWrap.appendChild(wrapper);
+          });
+
+          const passwordField = document.createElement("div");
+          passwordField.className = "field";
+          passwordField.innerHTML = `
+            <label>New Password (optional)</label>
+            <input type="password" placeholder="Leave blank to keep" />
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "table-header";
+          const saveButton = document.createElement("button");
+          saveButton.className = "primary";
+          saveButton.type = "button";
+          saveButton.textContent = "Save";
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "danger";
+          deleteButton.type = "button";
+          deleteButton.textContent = "Delete";
+          if (currentUser && currentUser.id === user.id) {
+            deleteButton.disabled = true;
+            deleteButton.classList.add("disabled");
+          }
+
+          saveButton.addEventListener("click", async () => {
+            const selected = [];
+            modules.forEach((module) => {
+              const value = document.querySelector(
+                `input[name="${user.id}-${module.key}"]:checked`
+              )?.value;
+              if (value && value !== "none") {
+                selected.push(`${module.key}:${value}`);
+              }
+            });
+            const passwordInput = passwordField.querySelector("input");
+            const payload = {
+              permissions: selected,
+            };
+            if (passwordInput.value.trim()) {
+              payload.password = passwordInput.value.trim();
+            }
+            const response = await fetch(`/api/users/${user.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              setStatus(usersStatus, "Unable to save user", "error");
+              return;
+            }
+            setStatus(usersStatus, "User updated", "success");
+            setTimeout(() => setStatus(usersStatus, ""), 1200);
+            await loadUsers();
+          });
+
+          deleteButton.addEventListener("click", async () => {
+            if (!confirm("Delete this user?")) return;
+            const response = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+            if (!response.ok) {
+              setStatus(usersStatus, "Unable to delete user", "error");
+              return;
+            }
+            setStatus(usersStatus, "User deleted", "success");
+            setTimeout(() => setStatus(usersStatus, ""), 1200);
+            await loadUsers();
+          });
+
+          actions.appendChild(saveButton);
+          actions.appendChild(deleteButton);
+
+          card.appendChild(header);
+          card.appendChild(permsWrap);
+          card.appendChild(passwordField);
+          card.appendChild(actions);
+          usersList.appendChild(card);
+        });
+      };
+
+      const loadUsers = async () => {
+        try {
+          const users = await fetchUsers();
+          renderUsers(users);
+        } catch (error) {
+          setStatus(usersStatus, "Unable to load users", "error");
+        }
+      };
+
+      createForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const username = document.getElementById("new-username").value.trim();
+        const password = document.getElementById("new-password").value.trim();
+        if (!username || !password) return;
+        const response = await fetch("/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            password,
+            permissions: [],
+          }),
+        });
+        if (!response.ok) {
+          setStatus(createStatus, "Unable to create user", "error");
+          return;
+        }
+        setStatus(createStatus, "User created", "success");
+        setTimeout(() => setStatus(createStatus, ""), 1200);
+        createForm.reset();
+        await loadUsers();
+      });
+
+      refreshButton.addEventListener("click", loadUsers);
+
+      const init = async () => {
+        currentUser = await fetchMe();
+        await loadUsers();
+      };
+
+      init();
+    </script>
+  </body>
+</html>

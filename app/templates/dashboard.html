@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Dashboard</h1>
+          <p class="subtitle">Choose a module to get started.</p>
+        </div>
+      </header>
+
+      <section class="panel dashboard-grid dashboard-compact">
+        <a class="dashboard-card" data-key="final_good_store" href="/final-good-store">
+          <h2>Final Good Store</h2>
+          <p>Manage finished goods inventory, low stock alerts, and updates.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="raw_material_store" href="/raw-material-store">
+          <h2>Raw Material Store</h2>
+          <p>Track raw materials inventory separately from finished goods.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="purchase_department" href="/purchase-department">
+          <h2>Purchase Department</h2>
+          <p>Review low raw material stock and place reorder quantities.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="boms" href="/boms">
+          <h2>BOM's</h2>
+          <p>Define raw material components required for each finished product.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="quality_checks" href="/quality-checks">
+          <h2>Quality Checks</h2>
+          <p>View QC logs for first part checks, raw materials, and dispatch.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="production_reports" href="/production-reports">
+          <h2>Production Reports</h2>
+          <p>Daily and weekly planned vs produced vs rejected summary.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="purchase_order_generator" href="/purchase-order-generator">
+          <h2>Purchase Order Generator</h2>
+          <p>Create purchase orders with multiple products pulled from inventory.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="orders" href="/orders">
+          <h2>Orders</h2>
+          <p>View history of all generated purchase order e‑bills.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="production_manager" href="/production-manager">
+          <h2>Production Manager</h2>
+          <p>Plan items to be produced and track required quantities.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="assembly_line" href="/assembly-line">
+          <h2>Assembly Line</h2>
+          <p>Move produced quantities into assembly before packaging.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="packaging" href="/packaging">
+          <h2>Packaging</h2>
+          <p>Track packing progress and update finished goods inventory.</p>
+          <span class="primary inline">Open</span>
+        </a>
+        <a class="dashboard-card" data-key="profile_settings" href="/profile-settings">
+          <h2>Profile Settings</h2>
+          <p>Create users and control module access.</p>
+          <span class="primary inline">Open</span>
+        </a>
+      </section>
+    </div>
+    <script src="/static/ui.js"></script>
+    <script>
+      const permissions = {{ permissions | tojson }};
+      if (!permissions.includes("*")) {
+        document.querySelectorAll(".dashboard-card").forEach((card) => {
+          const key = card.dataset.key;
+          const hasAccess = permissions.some((perm) => perm.startsWith(`${key}:`));
+          if (!hasAccess) {
+            card.style.display = "none";
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raw Material Store</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="raw_material_store">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Raw Material Store</h1>
+          <p class="subtitle">
+            Track raw materials separately. Add new items, edit inline, and watch low stock.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p class="card-title">Total Items</p>
+          <p class="card-number" id="total-count">0</p>
+          <p class="card-subtext" id="low-stock-count">0 low stock</p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <form id="add-form" class="add-form">
+          <div class="field">
+            <label for="sku">SKU</label>
+            <input id="sku" name="sku" type="text" placeholder="RM-1001" required />
+          </div>
+          <div class="field">
+            <label for="name">Item Name</label>
+            <input id="name" name="name" type="text" placeholder="Steel Sheet" required />
+          </div>
+          <div class="field">
+            <label for="quantity">Quantity</label>
+            <input
+              id="quantity"
+              name="quantity"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="500"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="reorder">Minimum Level</label>
+            <input
+              id="reorder"
+              name="reorder"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="100"
+            />
+          </div>
+          <button class="primary" type="submit">Add Material</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="table-header">
+          <div>
+            <h2>Import From Excel</h2>
+            <p class="hint">Upload a CSV exported from Excel with columns: sku,name,quantity,reorder_level.</p>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="import-file" type="file" accept=".csv" />
+          <button class="ghost" id="import-button" type="button">Import CSV</button>
+        </div>
+        <div id="import-status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Raw Material Table</h2>
+            <p class="hint">Click any field to edit. Changes save automatically.</p>
+          </div>
+          <div class="filters">
+            <input id="search" type="search" placeholder="Search SKU or name" data-readonly-allow="true" />
+            <select id="stock-filter">
+              <option value="all">All stock</option>
+              <option value="low">Low stock</option>
+              <option value="ok">In stock</option>
+            </select>
+            <button class="ghost" id="clear-all" type="button">Clear All</button>
+          </div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Raw materials inventory">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Quantity</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="table-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Material Usage Log</h2>
+            <p class="hint">Tracks material usage events from production.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Material usage log">
+          <div class="table-row table-head" role="row">
+            <span>Raw Material</span>
+            <span>Used Qty</span>
+            <span>Final Product</span>
+            <span>QC By</span>
+            <span>Date</span>
+          </div>
+          <div id="usage-log-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Rejected Items Log</h2>
+            <p class="hint">Rejected quantities captured during QC.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Rejected items log">
+          <div class="table-row table-head" role="row">
+            <span>Raw Material</span>
+            <span>Rejected Qty</span>
+            <span>QC By</span>
+            <span>Date</span>
+          </div>
+          <div id="rejected-log-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="qc-modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Raw Material QC</h2>
+          <p class="hint">Verify restocked materials before they enter inventory.</p>
+        </div>
+        <div class="modal-body">
+          <div class="table qc-table">
+            <div class="table-row table-head">
+              <span>SKU</span>
+              <span>Item</span>
+              <span>Restocked</span>
+              <span>Rejected ❌</span>
+              <span>Passed ✅</span>
+            </div>
+            <div id="qc-body" class="table-body"></div>
+          </div>
+          <div class="qc-footer">
+            <div class="field">
+              <label for="qc-name">QC Name</label>
+              <input id="qc-name" type="text" placeholder="Quality checker name" />
+            </div>
+            <div class="field">
+              <label for="qc-date">QC Date</label>
+              <input id="qc-date" type="date" />
+            </div>
+          </div>
+          <div id="qc-status" class="status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="qc-submit" class="primary" type="button">Submit QC</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const storageKey = "raw_material_store_items";
+      const snapshotKey = "raw_material_store_snapshot";
+      const qcPendingKey = "raw_material_qc_pending";
+      const tableBody = document.getElementById("table-body");
+      const totalCount = document.getElementById("total-count");
+      const lowStockCount = document.getElementById("low-stock-count");
+      const addForm = document.getElementById("add-form");
+      const clearAllButton = document.getElementById("clear-all");
+      const searchInput = document.getElementById("search");
+      const filterSelect = document.getElementById("stock-filter");
+      const statusEl = document.getElementById("status");
+      const importFile = document.getElementById("import-file");
+      const importButton = document.getElementById("import-button");
+      const importStatus = document.getElementById("import-status");
+      const qcModal = document.getElementById("qc-modal");
+      const qcBody = document.getElementById("qc-body");
+      const qcName = document.getElementById("qc-name");
+      const qcDate = document.getElementById("qc-date");
+      const qcStatus = document.getElementById("qc-status");
+      const qcSubmit = document.getElementById("qc-submit");
+      const usageLogBody = document.getElementById("usage-log-body");
+      const rejectedLogBody = document.getElementById("rejected-log-body");
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const setImportStatus = (message, type = "info") => {
+        importStatus.textContent = message;
+        importStatus.dataset.type = type;
+        importStatus.classList.toggle("visible", Boolean(message));
+      };
+
+      const setQcStatus = (message, type = "info") => {
+        qcStatus.textContent = message;
+        qcStatus.dataset.type = type;
+        qcStatus.classList.toggle("visible", Boolean(message));
+      };
+
+      const loadItems = () => {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const parseCsv = (text) => {
+        const lines = text.split(/\r?\n/).filter((line) => line.trim().length);
+        if (!lines.length) return [];
+        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+        const rows = [];
+        for (let i = 1; i < lines.length; i += 1) {
+          const cols = lines[i].split(",").map((c) => c.trim());
+          const row = {};
+          headers.forEach((h, idx) => {
+            row[h] = cols[idx] ?? "";
+          });
+          rows.push(row);
+        }
+        return rows;
+      };
+
+      const loadSnapshot = () => {
+        try {
+          const raw = localStorage.getItem(snapshotKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveSnapshot = (items) => {
+        localStorage.setItem(snapshotKey, JSON.stringify(items));
+      };
+
+      const loadQcPending = () => {
+        try {
+          const raw = localStorage.getItem(qcPendingKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveQcPending = (entries) => {
+        localStorage.setItem(qcPendingKey, JSON.stringify(entries));
+      };
+
+      const usageLogKey = "raw_material_usage_log";
+      const rejectedLogKey = "raw_material_rejected_log";
+
+      const loadLog = (key) => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveLog = (key, entries) => {
+        localStorage.setItem(key, JSON.stringify(entries));
+      };
+
+      const renderUsageLog = () => {
+        const entries = loadLog(usageLogKey);
+        usageLogBody.innerHTML = "";
+        if (!entries.length) {
+          usageLogBody.innerHTML = '<p class="hint">No usage logged yet.</p>';
+          return;
+        }
+        entries.forEach((entry, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const materialCell = document.createElement("input");
+          materialCell.value = entry.material;
+          materialCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = entry.qty;
+          qtyCell.readOnly = true;
+
+          const productCell = document.createElement("input");
+          productCell.value = entry.product;
+          productCell.readOnly = true;
+
+          const qcCell = document.createElement("input");
+          qcCell.value = entry.qc_by;
+          qcCell.readOnly = true;
+
+          const dateCell = document.createElement("input");
+          dateCell.value = entry.date;
+          dateCell.readOnly = true;
+
+          row.appendChild(materialCell);
+          row.appendChild(qtyCell);
+          row.appendChild(productCell);
+          row.appendChild(qcCell);
+          row.appendChild(dateCell);
+          usageLogBody.appendChild(row);
+        });
+      };
+
+      const renderRejectedLog = () => {
+        const entries = loadLog(rejectedLogKey);
+        rejectedLogBody.innerHTML = "";
+        if (!entries.length) {
+          rejectedLogBody.innerHTML = '<p class="hint">No rejected items logged yet.</p>';
+          return;
+        }
+        entries.forEach((entry, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const materialCell = document.createElement("input");
+          materialCell.value = entry.material;
+          materialCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = entry.qty;
+          qtyCell.readOnly = true;
+
+          const qcCell = document.createElement("input");
+          qcCell.value = entry.qc_by;
+          qcCell.readOnly = true;
+
+          const dateCell = document.createElement("input");
+          dateCell.value = entry.date;
+          dateCell.readOnly = true;
+
+          row.appendChild(materialCell);
+          row.appendChild(qtyCell);
+          row.appendChild(qcCell);
+          row.appendChild(dateCell);
+          rejectedLogBody.appendChild(row);
+        });
+      };
+
+      const saveItems = (items) => {
+        localStorage.setItem(storageKey, JSON.stringify(items));
+        totalCount.textContent = items.length;
+      };
+
+      const updateItem = (id, field, value) => {
+        const items = loadItems();
+        const index = items.findIndex((item) => item.id === id);
+        if (index === -1) return;
+        items[index][field] = value;
+        saveItems(items);
+      };
+
+      const removeItem = (id) => {
+        const items = loadItems().filter((item) => item.id !== id);
+        saveItems(items);
+        renderItems(items);
+      };
+
+      const createCell = (value, type, onChange, placeholder) => {
+        const input = document.createElement("input");
+        input.value = value ?? "";
+        input.type = type;
+        if (placeholder) input.placeholder = placeholder;
+        if (type === "number") {
+          input.min = "0";
+          input.step = "1";
+        }
+        input.addEventListener("input", (event) => onChange(event.target.value));
+        return input;
+      };
+
+      const getReorderLevel = (item) => Number(item.reorder_level ?? 0);
+      const getQuantity = (item) => Number(item.quantity ?? 0);
+
+      const matchesFilter = (item, query, filter) => {
+        const normalized = query.trim().toLowerCase();
+        const sku = String(item.sku || "").toLowerCase();
+        const name = String(item.name || "").toLowerCase();
+        const matchesText = !normalized || sku.includes(normalized) || name.includes(normalized);
+        if (!matchesText) return false;
+
+        const lowStock = getQuantity(item) <= getReorderLevel(item);
+        if (filter === "low") return lowStock;
+        if (filter === "ok") return !lowStock;
+        return true;
+      };
+
+      const renderItems = (items) => {
+        const query = searchInput.value || "";
+        const filter = filterSelect.value;
+        const filtered = items.filter((item) => matchesFilter(item, query, filter));
+
+        tableBody.innerHTML = "";
+        filtered.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const lowStock = getQuantity(item) <= getReorderLevel(item);
+          if (lowStock) {
+            row.classList.add("low-stock");
+          }
+
+          const skuCell = createCell(item.sku, "text", (value) =>
+            updateItem(item.id, "sku", value)
+          );
+          const nameCell = createCell(item.name, "text", (value) =>
+            updateItem(item.id, "name", value)
+          );
+          const qtyCell = createCell(item.quantity, "number", (value) =>
+            updateItem(item.id, "quantity", Number(value) || 0)
+          );
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+
+          const reorderWrap = document.createElement("div");
+          reorderWrap.className = "reorder";
+          const reorderLabel = document.createElement("span");
+          reorderLabel.textContent = "Minimum";
+          const reorderInput = createCell(getReorderLevel(item), "number", (value) =>
+            updateItem(item.id, "reorder_level", Number(value) || 0)
+          );
+          reorderWrap.appendChild(reorderLabel);
+          reorderWrap.appendChild(reorderInput);
+
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = lowStock ? "Low stock" : "OK";
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "danger";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", () => removeItem(item.id));
+
+          actionCell.appendChild(badge);
+          actionCell.appendChild(reorderWrap);
+          actionCell.appendChild(removeButton);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(actionCell);
+
+          tableBody.appendChild(row);
+        });
+
+        const lowStockItems = items.filter(
+          (item) => getQuantity(item) <= getReorderLevel(item)
+        );
+        totalCount.textContent = items.length;
+        lowStockCount.textContent = `${lowStockItems.length} low stock`;
+      };
+
+      const detectRestock = () => {
+        const current = loadItems();
+        const previous = loadSnapshot();
+        const pending = loadQcPending();
+
+        const prevMap = new Map(previous.map((item) => [item.id, item]));
+        const newPending = [];
+        const adjusted = current.map((item) => {
+          const prev = prevMap.get(item.id);
+          if (!prev) {
+            const initialQty = Number(item.quantity || 0);
+            if (initialQty > 0) {
+              newPending.push({
+                id: crypto.randomUUID(),
+                item_id: item.id,
+                sku: item.sku,
+                name: item.name,
+                restocked: initialQty,
+                rejected: "",
+                passed: "",
+              });
+              return { ...item, quantity: 0 };
+            }
+            return item;
+          }
+          const diff = Number(item.quantity || 0) - Number(prev.quantity || 0);
+          if (diff > 0) {
+            newPending.push({
+              id: crypto.randomUUID(),
+              item_id: item.id,
+              sku: item.sku,
+              name: item.name,
+              restocked: diff,
+              rejected: "",
+              passed: "",
+            });
+            return { ...item, quantity: Number(item.quantity || 0) - diff };
+          }
+          return item;
+        });
+
+        if (newPending.length) {
+          saveItems(adjusted);
+          const combined = [...newPending, ...pending];
+          saveQcPending(combined);
+          openQcModal(combined);
+          renderItems(adjusted);
+          return;
+        }
+
+        if (pending.length) {
+          openQcModal(pending);
+        }
+      };
+
+      let qcEntries = [];
+
+      const openQcModal = (entries) => {
+        qcEntries = entries.map((entry) => ({ ...entry }));
+        qcBody.innerHTML = "";
+        qcEntries.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+
+          const skuCell = document.createElement("input");
+          skuCell.value = entry.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = entry.name;
+          nameCell.readOnly = true;
+
+          const restockedCell = document.createElement("input");
+          restockedCell.value = entry.restocked;
+          restockedCell.readOnly = true;
+
+          const rejectedInput = document.createElement("input");
+          rejectedInput.type = "number";
+          rejectedInput.min = "0";
+          rejectedInput.step = "1";
+          rejectedInput.value = entry.rejected;
+          rejectedInput.placeholder = "0";
+          rejectedInput.addEventListener("input", (event) => {
+            entry.rejected = event.target.value;
+            saveQcPending(qcEntries);
+          });
+
+          const passedInput = document.createElement("input");
+          passedInput.type = "number";
+          passedInput.min = "0";
+          passedInput.step = "1";
+          passedInput.value = entry.passed;
+          passedInput.placeholder = "0";
+          passedInput.addEventListener("input", (event) => {
+            entry.passed = event.target.value;
+            saveQcPending(qcEntries);
+          });
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(restockedCell);
+          row.appendChild(rejectedInput);
+          row.appendChild(passedInput);
+          qcBody.appendChild(row);
+        });
+
+        saveQcPending(qcEntries);
+        qcModal.classList.remove("hidden");
+        document.body.classList.add("qc-open");
+      };
+
+      const closeQcModal = () => {
+        qcModal.classList.add("hidden");
+        document.body.classList.remove("qc-open");
+      };
+
+      qcSubmit.addEventListener("click", () => {
+        const entries = qcEntries.length ? qcEntries : loadQcPending();
+        const name = qcName.value.trim();
+        const date = qcDate.value;
+
+        if (!name || !date) {
+          setQcStatus("QC name and date are required.", "error");
+          return;
+        }
+
+        for (const entry of entries) {
+          const rejected = Number(entry.rejected);
+          const passed = Number(entry.passed);
+          if (!Number.isFinite(rejected) || !Number.isFinite(passed)) {
+            setQcStatus("Enter rejected and passed quantities for all items.", "error");
+            return;
+          }
+          if (rejected < 0 || passed < 0 || rejected + passed !== entry.restocked) {
+            setQcStatus(
+              `Rejected + Passed must equal ${entry.restocked} for ${entry.sku}.`,
+              "error"
+            );
+            return;
+          }
+        }
+
+        const items = loadItems();
+        const updated = items.map((item) => {
+          const matching = entries.find((entry) => entry.item_id === item.id);
+          if (!matching) return item;
+          const passed = Number(matching.passed || 0);
+          return { ...item, quantity: Number(item.quantity || 0) + passed };
+        });
+
+        const rejectedLog = loadLog(rejectedLogKey);
+        entries.forEach((entry) => {
+          const rejected = Number(entry.rejected || 0);
+          if (rejected > 0) {
+            rejectedLog.unshift({
+              id: crypto.randomUUID(),
+              material: `${entry.sku} — ${entry.name}`,
+              qty: rejected,
+              qc_by: name,
+              date: date,
+            });
+          }
+        });
+        saveLog(rejectedLogKey, rejectedLog);
+
+        saveItems(updated);
+        saveSnapshot(updated);
+        saveQcPending([]);
+        qcName.value = "";
+        qcDate.value = "";
+        setQcStatus("");
+        renderItems(updated);
+        renderUsageLog();
+        renderRejectedLog();
+        closeQcModal();
+      });
+
+      addForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const formData = new FormData(addForm);
+        const sku = String(formData.get("sku") || "").trim();
+        const name = String(formData.get("name") || "").trim();
+        const quantity = Number(formData.get("quantity") || 0);
+        const reorderLevel = Number(formData.get("reorder") || 0);
+
+        if (!sku || !name) return;
+
+        const items = loadItems();
+        const newItem = {
+          id: crypto.randomUUID(),
+          sku,
+          name,
+          quantity: Number.isFinite(quantity) ? Math.max(0, quantity) : 0,
+          reorder_level: Number.isFinite(reorderLevel) ? Math.max(0, reorderLevel) : 0,
+        };
+        items.unshift(newItem);
+        saveItems(items);
+        renderItems(items);
+        detectRestock();
+        addForm.reset();
+        setStatus("Material added", "success");
+        setTimeout(() => setStatus(""), 1200);
+      });
+
+      clearAllButton.addEventListener("click", () => {
+        if (!confirm("Clear all items from Raw Material Store?")) return;
+        saveItems([]);
+        saveSnapshot([]);
+        saveQcPending([]);
+        renderItems([]);
+      });
+
+      searchInput.addEventListener("input", () => renderItems(loadItems()));
+      filterSelect.addEventListener("change", () => renderItems(loadItems()));
+
+      importButton.addEventListener("click", async () => {
+        const file = importFile.files?.[0];
+        if (!file) {
+          setImportStatus("Select a CSV file first.", "error");
+          return;
+        }
+        const text = await file.text();
+        const rows = parseCsv(text);
+        if (!rows.length) {
+          setImportStatus("CSV has no rows.", "error");
+          return;
+        }
+        const items = loadItems();
+        const bySku = new Map(items.map((item) => [item.sku, item]));
+        rows.forEach((row) => {
+          const sku = row.sku?.trim();
+          const name = row.name?.trim();
+          if (!sku || !name) return;
+          const payload = {
+            id: bySku.get(sku)?.id || crypto.randomUUID(),
+            sku,
+            name,
+            quantity: Number(row.quantity || 0),
+            reorder_level: Number(row.reorder_level || 0),
+          };
+          bySku.set(sku, payload);
+        });
+        const updated = Array.from(bySku.values());
+        saveItems(updated);
+        renderItems(updated);
+        detectRestock();
+        setImportStatus("Import complete.", "success");
+        setTimeout(() => setImportStatus(""), 1500);
+      });
+
+      const init = () => {
+        const items = loadItems();
+        renderItems(items);
+        if (!loadSnapshot().length) {
+          saveSnapshot(items);
+        }
+        detectRestock();
+        renderUsageLog();
+        renderRejectedLog();
+      };
+
+      window.addEventListener("raw-material-restocked", () => {
+        detectRestock();
+      });
+
+      window.addEventListener("raw-material-updated", () => {
+        const items = loadItems();
+        renderItems(items);
+      });
+
+      init();
+    </script>
+  </body>
+</html>

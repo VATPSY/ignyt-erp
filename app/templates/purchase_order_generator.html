@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Purchase Order Generator</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="purchase_order_generator">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Purchase Order Generator</h1>
+          <p class="subtitle">
+            Build purchase orders with multiple items. SKUs are pulled from your
+            inventory list.
+          </p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <form id="po-form" class="add-form">
+          <div class="field">
+            <label for="customer">Customer Name</label>
+            <input id="customer" name="customer" type="text" placeholder="ABC Traders" required />
+          </div>
+          <div class="field">
+            <label for="sales-person">Sales Person Name</label>
+            <input id="sales-person" name="salesPerson" type="text" placeholder="Neha Sharma" required />
+          </div>
+          <div class="field">
+            <label for="order-time">Order Timestamp</label>
+            <input id="order-time" name="orderTime" type="datetime-local" required />
+          </div>
+          <button class="primary" type="submit">Generate Order</button>
+        </form>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Order Items</h2>
+            <p class="hint">Add multiple products and set quantities.</p>
+          </div>
+          <button class="ghost" id="add-line" type="button">Add Product</button>
+        </div>
+        <div id="po-status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Purchase order items">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Quantity</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="line-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="bill-header">
+          <div>
+            <h2>e‑Bill Summary</h2>
+            <p class="hint">Auto‑generated from the order form.</p>
+          </div>
+          <div class="bill-actions">
+            <div class="bill-meta">
+              <span>Order No.</span>
+              <strong id="bill-id">PO-0001</strong>
+            </div>
+            <button id="print-bill" class="ghost" type="button">Print e‑Bill</button>
+          </div>
+        </div>
+        <div class="bill-grid">
+          <div class="bill-card">
+            <p class="bill-label">Customer</p>
+            <p id="bill-customer" class="bill-value">—</p>
+          </div>
+          <div class="bill-card">
+            <p class="bill-label">Sales Person</p>
+            <p id="bill-sales" class="bill-value">—</p>
+          </div>
+          <div class="bill-card">
+            <p class="bill-label">Order Timestamp</p>
+            <p id="bill-time" class="bill-value">—</p>
+          </div>
+        </div>
+        <div class="bill-table" id="bill-area">
+          <div class="bill-row bill-head">
+            <span>SKU</span>
+            <span>Item Name</span>
+            <span>Quantity</span>
+          </div>
+          <div id="bill-lines" class="bill-body"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const lineBody = document.getElementById("line-body");
+      const addLineButton = document.getElementById("add-line");
+      const poForm = document.getElementById("po-form");
+      const billCustomer = document.getElementById("bill-customer");
+      const billSales = document.getElementById("bill-sales");
+      const billTime = document.getElementById("bill-time");
+      const billId = document.getElementById("bill-id");
+      const billLines = document.getElementById("bill-lines");
+      const statusEl = document.getElementById("po-status");
+      const printButton = document.getElementById("print-bill");
+      const billArea = document.getElementById("bill-area");
+
+      let items = [];
+      let lines = [];
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const fetchItems = async () => {
+        setStatus("Loading inventory...");
+        const response = await fetch("/api/items");
+        if (!response.ok) {
+          throw new Error("Unable to load inventory");
+        }
+        items = await response.json();
+        if (items.length === 0) {
+          setStatus("No inventory items found. Add items in Final Good Store first.", "error");
+        } else {
+          setStatus("");
+        }
+      };
+
+      const createSkuSelect = (selectedSku) => {
+        const select = document.createElement("select");
+        select.innerHTML = `<option value="">Select SKU</option>`;
+        items.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.sku;
+          option.textContent = `${item.sku} — ${item.name}`;
+          if (selectedSku === item.sku) option.selected = true;
+          select.appendChild(option);
+        });
+        return select;
+      };
+
+      const renderLines = () => {
+        lineBody.innerHTML = "";
+        lines.forEach((line, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuSelect = createSkuSelect(line.sku);
+          skuSelect.addEventListener("change", (event) => {
+            line.sku = event.target.value;
+            const item = items.find((i) => i.sku === line.sku);
+            line.name = item ? item.name : "";
+            renderLines();
+          });
+
+          const nameCell = document.createElement("input");
+          nameCell.value = line.name || "";
+          nameCell.readOnly = true;
+
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.min = "0";
+          qtyInput.step = "1";
+          qtyInput.value = line.quantity;
+          qtyInput.addEventListener("input", (event) => {
+            line.quantity = Number(event.target.value) || 0;
+          });
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "danger";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", () => {
+            lines = lines.filter((entry) => entry.id !== line.id);
+            renderLines();
+          });
+          actionCell.appendChild(removeButton);
+
+          row.appendChild(skuSelect);
+          row.appendChild(nameCell);
+          row.appendChild(qtyInput);
+          row.appendChild(actionCell);
+
+          lineBody.appendChild(row);
+        });
+      };
+
+      const addLine = () => {
+        lines.push({ id: crypto.randomUUID(), sku: "", name: "", quantity: 0 });
+        renderLines();
+      };
+
+      poForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(poForm);
+        const customer = String(formData.get("customer") || "").trim();
+        const salesPerson = String(formData.get("salesPerson") || "").trim();
+        const orderTime = String(formData.get("orderTime") || "").trim();
+
+        if (!customer || !salesPerson || !orderTime) return;
+
+        const cleanLines = lines
+          .filter((line) => line.sku && line.quantity > 0)
+          .map((line) => ({
+            sku: line.sku,
+            item_name: line.name,
+            quantity: line.quantity,
+          }));
+
+        if (cleanLines.length === 0) {
+          setStatus("Add at least one product with quantity.", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/purchase-orders/with-lines", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customer_name: customer,
+              sales_person: salesPerson,
+              order_timestamp: orderTime,
+              lines: cleanLines.map((line) => ({
+                sku: line.sku,
+                quantity: line.quantity,
+              })),
+            }),
+          });
+
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to create order");
+          }
+
+          const created = await response.json();
+          billCustomer.textContent = customer;
+          billSales.textContent = salesPerson;
+          billTime.textContent = new Date(orderTime).toLocaleString();
+          billId.textContent = `PO-${String(created.id).padStart(4, "0")}`;
+          billLines.innerHTML = "";
+          cleanLines.forEach((line) => {
+            const row = document.createElement("div");
+            row.className = "bill-row";
+            row.innerHTML = `
+              <span>${line.sku}</span>
+              <span>${line.item_name}</span>
+              <span>${line.quantity}</span>
+            `;
+            billLines.appendChild(row);
+          });
+          setStatus("Order created and inventory updated.", "success");
+          setTimeout(() => setStatus(""), 1800);
+        } catch (error) {
+          setStatus(error.message || "Unable to create order", "error");
+        }
+      });
+
+      addLineButton.addEventListener("click", addLine);
+      printButton.addEventListener("click", () => {
+        if (!billLines.children.length) {
+          setStatus("Generate the e‑bill summary first.", "error");
+          return;
+        }
+        window.print();
+      });
+
+      const init = async () => {
+        const now = new Date();
+        const localTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .slice(0, 16);
+        document.getElementById("order-time").value = localTime;
+
+        try {
+          await fetchItems();
+          if (lines.length === 0) addLine();
+        } catch (error) {
+          setStatus("Unable to load inventory.", "error");
+        }
+      };
+
+      init();
+    </script>
+  </body>
+</html>

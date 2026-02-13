@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Packaging</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="packaging">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Packaging</h1>
+          <p class="subtitle">
+            Update packaging progress. Completed quantities are added to Final Good Store.
+          </p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Packaging Queue</h2>
+            <p class="hint">Generated automatically from completed production plans.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="pack-status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Packaging queue">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Packed / Total</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="pack-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Packaging History</h2>
+            <p class="hint">Completed packaging batches moved here.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Packaging history">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Packed / Total</span>
+            <span role="columnheader">Status</span>
+          </div>
+          <div id="history-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const packBody = document.getElementById("pack-body");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("pack-status");
+      const historyBody = document.getElementById("history-body");
+
+      let packaging = [];
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const renderPackaging = () => {
+        packBody.innerHTML = "";
+        const active = packaging.filter((pack) => pack.status !== "DONE");
+        const completed = packaging.filter((pack) => pack.status === "DONE");
+
+        active.forEach((pack, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = pack.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = pack.item_name;
+          nameCell.readOnly = true;
+
+          const qtyWrap = document.createElement("div");
+          qtyWrap.className = "pack-qty";
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.min = "0";
+          qtyInput.max = pack.qty_total;
+          qtyInput.step = "1";
+          qtyInput.value = pack.qty_packed;
+          const qtyTotal = document.createElement("span");
+          qtyTotal.textContent = ` / ${pack.qty_total}`;
+          qtyWrap.appendChild(qtyInput);
+          qtyWrap.appendChild(qtyTotal);
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          const statusSelect = document.createElement("select");
+          ["PLANNED", "IN_PROGRESS", "DONE"].forEach((status) => {
+            const option = document.createElement("option");
+            option.value = status;
+            option.textContent = status.replace("_", " ");
+            if (pack.status === status) option.selected = true;
+            statusSelect.appendChild(option);
+          });
+
+          const saveButton = document.createElement("button");
+          saveButton.type = "button";
+          saveButton.className = "primary";
+          saveButton.textContent = "Update";
+          saveButton.addEventListener("click", async () => {
+            const newPacked = Number(qtyInput.value) || 0;
+            const newStatus = statusSelect.value;
+            try {
+              const response = await fetch(`/api/packaging/${pack.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ qty_packed: newPacked, status: newStatus }),
+              });
+              if (!response.ok) {
+                const detail = await response.json().catch(() => ({}));
+                throw new Error(detail.detail || "Unable to update packaging");
+              }
+              const updated = await response.json();
+              packaging = packaging.map((entry) => (entry.id === updated.id ? updated : entry));
+              renderPackaging();
+              setStatus("Packaging updated.", "success");
+              setTimeout(() => setStatus(""), 1500);
+            } catch (error) {
+              setStatus(error.message || "Unable to update packaging", "error");
+            }
+          });
+
+          actionCell.appendChild(statusSelect);
+          actionCell.appendChild(saveButton);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyWrap);
+          row.appendChild(actionCell);
+
+          packBody.appendChild(row);
+        });
+
+        historyBody.innerHTML = "";
+        completed.forEach((pack, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = pack.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = pack.item_name;
+          nameCell.readOnly = true;
+
+          const qtyWrap = document.createElement("div");
+          qtyWrap.className = "pack-qty";
+          const qtyInput = document.createElement("input");
+          qtyInput.value = pack.qty_packed;
+          qtyInput.readOnly = true;
+          const qtyTotal = document.createElement("span");
+          qtyTotal.textContent = ` / ${pack.qty_total}`;
+          qtyWrap.appendChild(qtyInput);
+          qtyWrap.appendChild(qtyTotal);
+
+          const statusCell = document.createElement("input");
+          statusCell.value = "DONE";
+          statusCell.readOnly = true;
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyWrap);
+          row.appendChild(statusCell);
+
+          historyBody.appendChild(row);
+        });
+      };
+
+      const fetchPackaging = async () => {
+        setStatus("Loading packaging queue...");
+        try {
+          const response = await fetch("/api/packaging");
+          if (!response.ok) throw new Error("Unable to load packaging");
+          packaging = await response.json();
+          renderPackaging();
+          setStatus("");
+        } catch (error) {
+          setStatus("Unable to load packaging", "error");
+        }
+      };
+
+      refreshButton.addEventListener("click", fetchPackaging);
+      fetchPackaging();
+    </script>
+  </body>
+</html>

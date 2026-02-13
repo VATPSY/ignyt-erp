@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Purchase Department</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="purchase_department">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Purchase Department</h1>
+          <p class="subtitle">
+            Review raw materials that are below minimum level and place reorders.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p class="card-title">Low Stock</p>
+          <p class="card-number" id="low-count">0</p>
+          <p class="card-subtext">items need reorder</p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Reorder Queue</h2>
+            <p class="hint">Quantities are suggested to reach minimum level.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Raw material reorder queue">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Current / Min</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="table-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="table-header">
+          <div>
+            <h2>Manual Order</h2>
+            <p class="hint">Place a manual raw material order when needed.</p>
+          </div>
+        </div>
+        <form id="manual-order-form" class="add-form">
+          <div class="field">
+            <label for="manual-item">Raw Material</label>
+            <select id="manual-item" required></select>
+          </div>
+          <div class="field">
+            <label for="manual-qty">Order Quantity</label>
+            <input
+              id="manual-qty"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="50"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="manual-date">Expected Delivery</label>
+            <input id="manual-date" type="date" required />
+          </div>
+          <button class="primary" type="submit">Place Manual Order</button>
+        </form>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Reorder Log Book</h2>
+            <p class="hint">History of raw material reorders.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Reorder log book">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Reorder Qty</span>
+            <span role="columnheader">Expected Delivery</span>
+          </div>
+          <div id="log-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const storageKey = "raw_material_store_items";
+      const queueKey = "raw_material_reorder_queue";
+      const tableBody = document.getElementById("table-body");
+      const logBody = document.getElementById("log-body");
+      const lowCount = document.getElementById("low-count");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("status");
+      const logKey = "raw_material_reorder_log";
+      const qcPendingKey = "raw_material_qc_pending";
+      const manualForm = document.getElementById("manual-order-form");
+      const manualItem = document.getElementById("manual-item");
+      const manualQty = document.getElementById("manual-qty");
+      const manualDate = document.getElementById("manual-date");
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const loadItems = () => {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const loadQueue = () => {
+        try {
+          const raw = localStorage.getItem(queueKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveQueue = (entries) => {
+        localStorage.setItem(queueKey, JSON.stringify(entries));
+      };
+
+      const saveItems = (items) => {
+        localStorage.setItem(storageKey, JSON.stringify(items));
+      };
+
+      const loadQcPending = () => {
+        try {
+          const raw = localStorage.getItem(qcPendingKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveQcPending = (entries) => {
+        localStorage.setItem(qcPendingKey, JSON.stringify(entries));
+      };
+
+      const populateManualItems = () => {
+        const items = loadItems();
+        manualItem.innerHTML = '<option value="">Select raw material</option>';
+        items.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.id;
+          option.textContent = `${item.sku} — ${item.name}`;
+          manualItem.appendChild(option);
+        });
+        manualDate.value = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+      };
+
+      const loadLog = () => {
+        try {
+          const raw = localStorage.getItem(logKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const saveLog = (entries) => {
+        localStorage.setItem(logKey, JSON.stringify(entries));
+      };
+
+      const renderLog = () => {
+        const entries = loadLog();
+        logBody.innerHTML = "";
+        if (!entries.length) {
+          logBody.innerHTML = '<p class="hint">No reorders placed yet.</p>';
+          return;
+        }
+        entries.forEach((entry, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = entry.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = entry.name;
+          nameCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = entry.qty;
+          qtyCell.readOnly = true;
+
+          const dateCell = document.createElement("input");
+          dateCell.type = "date";
+          dateCell.value = entry.expected_delivery || "";
+          dateCell.addEventListener("change", (event) => {
+            entry.expected_delivery = event.target.value;
+            const updated = entries.map((item) =>
+              item.id === entry.id ? { ...item, expected_delivery: entry.expected_delivery } : item
+            );
+            saveLog(updated);
+          });
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(dateCell);
+
+          logBody.appendChild(row);
+        });
+      };
+
+      const addLogEntry = (item, qty, expectedDelivery) => {
+        const entries = loadLog();
+        entries.unshift({
+          id: crypto.randomUUID(),
+          sku: item.sku,
+          name: item.name,
+          qty,
+          expected_delivery: expectedDelivery,
+        });
+        saveLog(entries);
+      };
+
+      const syncQueue = () => {
+        const items = loadItems();
+        const queue = loadQueue();
+        const queueMap = new Map(queue.map((entry) => [entry.item_id, entry]));
+        const lowItems = items.filter(
+          (item) => Number(item.quantity || 0) < Number(item.reorder_level || 0)
+        );
+
+        lowItems.forEach((item) => {
+          const diff = Math.max(0, (item.reorder_level || 0) - (item.quantity || 0));
+          const existing = queueMap.get(item.id);
+          if (existing) {
+            // Already triggered once; keep as-is until received.
+            return;
+          }
+          queue.push({
+            id: crypto.randomUUID(),
+            item_id: item.id,
+            sku: item.sku,
+            name: item.name,
+            qty: diff,
+            expected_delivery: "",
+            placed: false,
+          });
+        });
+
+        // Keep queue items even if stock is replenished, until received.
+        saveQueue(queue);
+      };
+
+      const renderQueue = () => {
+        syncQueue();
+        const queue = loadQueue();
+        lowCount.textContent = queue.length;
+        tableBody.innerHTML = "";
+
+        queue.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row low-stock";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = item.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = item.name;
+          nameCell.readOnly = true;
+
+          const qtyWrap = document.createElement("div");
+          qtyWrap.className = "pack-qty";
+          const current = document.createElement("input");
+          current.value = item.quantity ?? 0;
+          current.readOnly = true;
+          const min = document.createElement("span");
+          min.textContent = ` / ${item.reorder_level ?? 0}`;
+          qtyWrap.appendChild(current);
+          qtyWrap.appendChild(min);
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          const diffBadge = document.createElement("span");
+          diffBadge.className = "badge";
+          diffBadge.textContent = `Reorder ${item.qty}`;
+
+          const deliveryInput = document.createElement("input");
+          deliveryInput.type = "date";
+          deliveryInput.value =
+            item.expected_delivery ||
+            new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          deliveryInput.addEventListener("change", (event) => {
+            item.expected_delivery = event.target.value;
+            const updated = loadQueue().map((entry) =>
+              entry.id === item.id ? { ...entry, expected_delivery: item.expected_delivery } : entry
+            );
+            saveQueue(updated);
+          });
+
+          const orderButton = document.createElement("button");
+          orderButton.type = "button";
+          orderButton.className = "primary inline";
+          orderButton.textContent = "Place Reorder";
+          if (item.placed) {
+            orderButton.disabled = true;
+            orderButton.classList.add("disabled");
+          }
+          orderButton.addEventListener("click", () => {
+            const expectedDelivery =
+              deliveryInput.value ||
+              new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const updatedQueue = loadQueue().map((entry) =>
+              entry.id === item.id
+                ? { ...entry, placed: true, expected_delivery: expectedDelivery }
+                : entry
+            );
+            saveQueue(updatedQueue);
+            renderQueue();
+            setStatus("Reorder placed.", "success");
+            setTimeout(() => setStatus(""), 1200);
+          });
+
+          const receiveButton = document.createElement("button");
+          receiveButton.type = "button";
+          receiveButton.className = "primary inline";
+          receiveButton.textContent = "Order Received";
+          receiveButton.disabled = !item.placed;
+          if (!item.placed) {
+            receiveButton.classList.add("disabled");
+          }
+          receiveButton.addEventListener("click", () => {
+            const pending = loadQcPending();
+            pending.push({
+              id: crypto.randomUUID(),
+              item_id: item.item_id,
+              sku: item.sku,
+              name: item.name,
+              restocked: Number(item.qty || 0),
+              rejected: "",
+              passed: "",
+            });
+            saveQcPending(pending);
+            addLogEntry(item, item.qty, item.expected_delivery || "");
+            const remaining = loadQueue().filter((entry) => entry.id !== item.id);
+            saveQueue(remaining);
+            renderQueue();
+            renderLog();
+            setStatus("Order received and sent to QC.", "success");
+            setTimeout(() => setStatus(""), 1200);
+          });
+
+          actionCell.appendChild(diffBadge);
+          actionCell.appendChild(deliveryInput);
+          actionCell.appendChild(orderButton);
+          actionCell.appendChild(receiveButton);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyWrap);
+          row.appendChild(actionCell);
+
+          tableBody.appendChild(row);
+        });
+
+        if (queue.length === 0) {
+          tableBody.innerHTML = '<p class="hint">No raw materials are below minimum.</p>';
+        }
+      };
+
+      refreshButton.addEventListener("click", () => {
+        renderQueue();
+        renderLog();
+        populateManualItems();
+      });
+      renderQueue();
+      renderLog();
+      populateManualItems();
+
+      manualForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const items = loadItems();
+        const selected = items.find((item) => item.id === manualItem.value);
+        const qty = Number(manualQty.value || 0);
+        const expectedDelivery = manualDate.value;
+        if (!selected || qty <= 0 || !expectedDelivery) return;
+
+        const queue = loadQueue();
+        queue.push({
+          id: crypto.randomUUID(),
+          item_id: selected.id,
+          sku: selected.sku,
+          name: selected.name,
+          qty,
+          expected_delivery: expectedDelivery,
+          placed: true,
+        });
+        saveQueue(queue);
+        renderQueue();
+        manualForm.reset();
+        populateManualItems();
+        setStatus("Manual order placed in queue.", "success");
+        setTimeout(() => setStatus(""), 1200);
+      });
+    </script>
+  </body>
+</html>

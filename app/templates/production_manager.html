@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Production Manager</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="production_manager">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Production Manager</h1>
+          <p class="subtitle">
+            Plan items that need to be produced. Select SKUs from inventory and
+            set required quantities.
+          </p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <form id="prod-form" class="add-form">
+          <div class="field">
+            <label for="sku">SKU</label>
+            <select id="sku" name="sku" required></select>
+          </div>
+          <div class="field">
+            <label for="quantity">Quantity To Produce</label>
+            <input
+              id="quantity"
+              name="quantity"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="50"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status" name="status">
+              <option value="PLANNED">PLANNED</option>
+              <option value="IN_PROGRESS">IN PROGRESS</option>
+              <option value="DONE">DONE</option>
+            </select>
+          </div>
+          <button class="primary" type="submit">Add To Plan</button>
+        </form>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Production Plan</h2>
+            <p class="hint">All items scheduled for production.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="prod-status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Production plan">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Quantity</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="plan-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Production Completed</h2>
+            <p class="hint">Completed work orders moved here and added to inventory.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Production completed">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Quantity</span>
+            <span role="columnheader">Status</span>
+          </div>
+          <div id="completed-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const skuSelect = document.getElementById("sku");
+      const prodForm = document.getElementById("prod-form");
+      const planBody = document.getElementById("plan-body");
+      const completedBody = document.getElementById("completed-body");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("prod-status");
+
+      let items = [];
+      let plans = [];
+      const bomKey = "boms_store";
+      const rawKey = "raw_material_store_items";
+      const reorderLogKey = "raw_material_reorder_log";
+      const reorderQueueKey = "raw_material_reorder_queue";
+      const usageLogKey = "raw_material_usage_log";
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const fetchInventory = async () => {
+        const response = await fetch("/api/items");
+        if (!response.ok) throw new Error("Unable to load inventory");
+        items = await response.json();
+        skuSelect.innerHTML = '<option value="">Select SKU</option>';
+        items.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.sku;
+          option.textContent = `${item.sku} — ${item.name}`;
+          skuSelect.appendChild(option);
+        });
+      };
+
+      const fetchPlans = async () => {
+        const response = await fetch("/api/work-orders");
+        if (!response.ok) throw new Error("Unable to load plan");
+        plans = await response.json();
+        renderPlans();
+      };
+
+      const loadBoms = () => {
+        try {
+          const raw = localStorage.getItem(bomKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const loadRawMaterials = () => {
+        try {
+          const raw = localStorage.getItem(rawKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          return [];
+        }
+      };
+
+      const logReorder = (entries) => {
+        if (!entries.length) return;
+        let queue = [];
+        try {
+          const raw = localStorage.getItem(reorderQueueKey);
+          queue = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          queue = [];
+        }
+        const queueMap = new Map(queue.map((item) => [item.sku, item]));
+        entries.forEach((entry) => {
+          const existing = queueMap.get(entry.sku);
+          if (existing) {
+            // Already in queue; don't retrigger while waiting for receipt.
+            return;
+          } else {
+            queue.push({
+              id: crypto.randomUUID(),
+              item_id: entry.item_id || "",
+              sku: entry.sku,
+              name: entry.name,
+              qty: entry.qty,
+              expected_delivery: "",
+              placed: false,
+            });
+          }
+        });
+        localStorage.setItem(reorderQueueKey, JSON.stringify(queue));
+      };
+
+      const deductRawMaterials = (finalSku, finalQty) => {
+        const bomEntries = loadBoms().filter((entry) => entry.final_sku === finalSku);
+        const rawMaterials = loadRawMaterials();
+        if (!bomEntries.length) return;
+
+        const reorderQueueRaw = localStorage.getItem(reorderQueueKey);
+        let reorderQueue = [];
+        try {
+          reorderQueue = reorderQueueRaw ? JSON.parse(reorderQueueRaw) : [];
+        } catch (error) {
+          reorderQueue = [];
+        }
+        const queueMap = new Map(reorderQueue.map((entry) => [entry.item_id, entry]));
+
+        const updated = rawMaterials.map((item) => {
+          const bom = bomEntries.find((entry) => entry.raw_sku === item.sku);
+          if (!bom) return item;
+          const needed = Number(bom.quantity || 0) * finalQty;
+          const minLevel = Number(item.reorder_level || 0);
+          const currentQty = Number(item.quantity || 0);
+          const usable = Math.max(0, currentQty - minLevel);
+          const shortage = Math.max(0, needed - usable);
+          const newQty = shortage > 0 ? minLevel : Math.max(0, currentQty - needed);
+
+          if (shortage > 0) {
+            const existing = queueMap.get(item.id);
+            if (existing) {
+              existing.qty = Math.max(existing.qty, shortage);
+            } else {
+              reorderQueue.push({
+                id: crypto.randomUUID(),
+                item_id: item.id,
+                sku: item.sku,
+                name: item.name,
+                qty: shortage,
+                expected_delivery: "",
+                placed: false,
+              });
+            }
+          }
+          return {
+            ...item,
+            quantity: newQty,
+          };
+        });
+        localStorage.setItem(rawKey, JSON.stringify(updated));
+        localStorage.setItem(reorderQueueKey, JSON.stringify(reorderQueue));
+        localStorage.setItem("raw_material_store_snapshot", JSON.stringify(updated));
+        window.dispatchEvent(new Event("raw-material-updated"));
+
+        let usageLog = [];
+        try {
+          const raw = localStorage.getItem(usageLogKey);
+          usageLog = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          usageLog = [];
+        }
+
+        const finalLabel = `${finalSku}`;
+        const date = new Date().toLocaleString();
+        bomEntries.forEach((bom) => {
+          const needed = Number(bom.quantity || 0) * finalQty;
+          usageLog.unshift({
+            id: crypto.randomUUID(),
+            material: `${bom.raw_sku} — ${bom.raw_name}`,
+            qty: needed,
+            product: finalLabel,
+            qc_by: "",
+            date,
+          });
+        });
+        localStorage.setItem(usageLogKey, JSON.stringify(usageLog));
+      };
+
+      const checkRawMaterialAvailability = (finalSku, finalQty) => {
+        const bomEntries = loadBoms().filter((entry) => entry.final_sku === finalSku);
+        if (!bomEntries.length) {
+          return { ok: false, message: "No BOM set for this product." };
+        }
+        const rawMaterials = loadRawMaterials();
+        const shortages = [];
+
+        bomEntries.forEach((bom) => {
+          const rawItem = rawMaterials.find((item) => item.sku === bom.raw_sku);
+          const available = Number(rawItem?.quantity || 0);
+          const needed = Number(bom.quantity || 0) * finalQty;
+          if (available < needed) {
+            shortages.push({
+              item_id: rawItem?.id || "",
+              sku: bom.raw_sku,
+              name: bom.raw_name,
+              qty: Math.max(0, needed - available),
+            });
+          }
+        });
+
+        if (shortages.length) {
+          logReorder(shortages);
+          return {
+            ok: false,
+            message: `Raw material shortage. Purchase order raised for ${shortages
+              .map((s) => `${s.sku} (${s.qty})`)
+              .join(", ")}.`,
+          };
+        }
+        return { ok: true, message: "Raw materials available. Ready for assembly." };
+      };
+
+      const renderPlans = () => {
+        planBody.innerHTML = "";
+        const activePlans = plans.filter((plan) => plan.status !== "DONE");
+        const completedPlans = plans.filter((plan) => plan.status === "DONE");
+
+        activePlans.forEach((plan, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = plan.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = plan.item_name;
+          nameCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = plan.quantity;
+          qtyCell.readOnly = true;
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+
+          const produceWrap = document.createElement("div");
+          produceWrap.className = "pack-qty";
+          const produceInput = document.createElement("input");
+          produceInput.type = "number";
+          produceInput.min = "1";
+          produceInput.max = plan.quantity;
+          produceInput.step = "1";
+          produceInput.value = plan.quantity;
+          const produceButton = document.createElement("button");
+          produceButton.type = "button";
+          produceButton.className = "primary";
+          produceButton.textContent = "Produce";
+          const availability = checkRawMaterialAvailability(plan.sku, Number(produceInput.value) || 0);
+          const statusNote = document.createElement("span");
+          statusNote.className = availability.ok ? "badge" : "badge";
+          statusNote.textContent = availability.ok ? "Raw material ok" : "Raw material short";
+          if (!availability.ok) {
+            produceButton.disabled = true;
+            produceButton.classList.add("disabled");
+          }
+          produceInput.addEventListener("input", () => {
+            const qty = Number(produceInput.value) || 0;
+            const result = checkRawMaterialAvailability(plan.sku, qty);
+            statusNote.textContent = result.ok ? "Raw material ok" : "Raw material short";
+            produceButton.disabled = !result.ok;
+          });
+          produceButton.addEventListener("click", async () => {
+            const qty = Number(produceInput.value) || 0;
+            if (qty <= 0) return;
+            const result = checkRawMaterialAvailability(plan.sku, qty);
+            if (!result.ok) {
+              setStatus(result.message, "error");
+              return;
+            }
+            try {
+              const response = await fetch(`/api/work-orders/${plan.id}/produce`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ quantity: qty }),
+              });
+              if (!response.ok) throw new Error("Unable to produce quantity");
+              const updated = await response.json();
+              deductRawMaterials(plan.sku, qty);
+              plans = plans.map((entry) => (entry.id === updated.id ? updated : entry));
+              renderPlans();
+              setStatus("Production quantity moved to assembly.", "success");
+              setTimeout(() => setStatus(""), 1500);
+            } catch (error) {
+              setStatus("Unable to produce quantity.", "error");
+            }
+          });
+          produceWrap.appendChild(produceInput);
+          produceWrap.appendChild(produceButton);
+
+          const statusSelect = document.createElement("select");
+          ["PLANNED", "IN_PROGRESS", "DONE"].forEach((status) => {
+            const option = document.createElement("option");
+            option.value = status;
+            option.textContent = status.replace("_", " ");
+            if (plan.status === status) option.selected = true;
+            statusSelect.appendChild(option);
+          });
+          statusSelect.addEventListener("change", async (event) => {
+            const newStatus = event.target.value;
+            try {
+              const response = await fetch(`/api/work-orders/${plan.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: newStatus }),
+              });
+              if (!response.ok) throw new Error("Unable to update status");
+              const updated = await response.json();
+              plans = plans.map((entry) => (entry.id === updated.id ? updated : entry));
+              renderPlans();
+            } catch (error) {
+              setStatus("Unable to update status.", "error");
+            }
+          });
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "danger";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", async () => {
+            await fetch(`/api/work-orders/${plan.id}`, { method: "DELETE" });
+            plans = plans.filter((entry) => entry.id !== plan.id);
+            renderPlans();
+          });
+          actionCell.appendChild(produceWrap);
+          actionCell.appendChild(statusNote);
+          actionCell.appendChild(statusSelect);
+          actionCell.appendChild(removeButton);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(actionCell);
+
+          planBody.appendChild(row);
+        });
+
+        completedBody.innerHTML = "";
+        completedPlans.forEach((plan, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = plan.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = plan.item_name;
+          nameCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = plan.quantity;
+          qtyCell.readOnly = true;
+
+          const statusCell = document.createElement("input");
+          statusCell.value = "DONE";
+          statusCell.readOnly = true;
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(statusCell);
+
+          completedBody.appendChild(row);
+        });
+      };
+
+      prodForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(prodForm);
+        const sku = String(formData.get("sku") || "");
+        const quantity = Number(formData.get("quantity") || 0);
+        const status = String(formData.get("status") || "PLANNED");
+
+        if (!sku || quantity <= 0) return;
+
+        try {
+          const response = await fetch("/api/work-orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sku, quantity, status }),
+          });
+          if (!response.ok) throw new Error("Unable to add plan");
+          const created = await response.json();
+          plans = [created, ...plans];
+          renderPlans();
+          prodForm.reset();
+          setStatus("Added to production plan.", "success");
+          setTimeout(() => setStatus(""), 1500);
+        } catch (error) {
+          setStatus("Unable to add plan.", "error");
+        }
+      });
+
+      refreshButton.addEventListener("click", () => {
+        fetchPlans().catch(() => setStatus("Unable to load plan", "error"));
+      });
+
+      const init = async () => {
+        try {
+          await fetchInventory();
+          await fetchPlans();
+        } catch (error) {
+          setStatus("Unable to load data.", "error");
+        }
+      };
+
+      init();
+    </script>
+  </body>
+</html>

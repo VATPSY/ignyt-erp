@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Production Reports</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="production_reports">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Production Reports</h1>
+          <p class="subtitle">Daily and weekly planned vs produced vs rejected.</p>
+        </div>
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Daily Report</h2>
+            <p class="hint" id="daily-range">Today</p>
+          </div>
+          <button class="ghost" id="refresh-daily" type="button" data-readonly-allow="true">
+            Refresh
+          </button>
+        </div>
+        <div id="daily-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table class="table" id="daily-table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Item Name</th>
+                <th>Planned</th>
+                <th>Produced</th>
+                <th>Rejected</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Weekly Report</h2>
+            <p class="hint" id="weekly-range">Last 7 days</p>
+          </div>
+          <button class="ghost" id="refresh-weekly" type="button" data-readonly-allow="true">
+            Refresh
+          </button>
+        </div>
+        <div id="weekly-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table class="table" id="weekly-table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Item Name</th>
+                <th>Planned</th>
+                <th>Produced</th>
+                <th>Rejected</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const formatRange = (start, end) => {
+        const s = new Date(start).toLocaleString();
+        const e = new Date(end).toLocaleString();
+        return `${s} → ${e}`;
+      };
+
+      const renderTable = (table, data) => {
+        const body = table.querySelector("tbody");
+        const foot = table.querySelector("tfoot");
+        body.innerHTML = "";
+        foot.innerHTML = "";
+        if (!data.rows.length) {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td colspan="5" class="muted">No data for this period.</td>`;
+          body.appendChild(row);
+        } else {
+          data.rows.forEach((row) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>${row.sku}</td>
+              <td>${row.item_name}</td>
+              <td>${row.planned}</td>
+              <td>${row.produced}</td>
+              <td>${row.rejected}</td>
+            `;
+            body.appendChild(tr);
+          });
+        }
+        const total = data.totals;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>${total.sku}</strong></td>
+          <td></td>
+          <td><strong>${total.planned}</strong></td>
+          <td><strong>${total.produced}</strong></td>
+          <td><strong>${total.rejected}</strong></td>
+        `;
+        foot.appendChild(tr);
+      };
+
+      const loadReport = async (range, table, statusEl, rangeEl) => {
+        statusEl.textContent = "";
+        try {
+          const response = await fetch(`/api/reports/production?range=${range}`);
+          if (!response.ok) throw new Error("Failed");
+          const data = await response.json();
+          renderTable(table, data);
+          rangeEl.textContent = formatRange(data.start, data.end);
+        } catch (err) {
+          statusEl.textContent = "Unable to load report.";
+          statusEl.dataset.type = "error";
+          statusEl.classList.add("visible");
+        }
+      };
+
+      const dailyTable = document.getElementById("daily-table");
+      const weeklyTable = document.getElementById("weekly-table");
+      const dailyStatus = document.getElementById("daily-status");
+      const weeklyStatus = document.getElementById("weekly-status");
+      const dailyRange = document.getElementById("daily-range");
+      const weeklyRange = document.getElementById("weekly-range");
+
+      document
+        .getElementById("refresh-daily")
+        .addEventListener("click", () =>
+          loadReport("daily", dailyTable, dailyStatus, dailyRange)
+        );
+      document
+        .getElementById("refresh-weekly")
+        .addEventListener("click", () =>
+          loadReport("weekly", weeklyTable, weeklyStatus, weeklyRange)
+        );
+
+      loadReport("daily", dailyTable, dailyStatus, dailyRange);
+      loadReport("weekly", weeklyTable, weeklyStatus, weeklyRange);
+    </script>
+  </body>
+</html>

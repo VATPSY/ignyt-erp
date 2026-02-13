@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Final Good Store</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="final_good_store">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Final Good Store</h1>
+          <p class="subtitle">
+            Track finished products ready for dispatch. Add new items, edit inline, and
+            keep an eye on low stock.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p class="card-title">Total Items</p>
+          <p class="card-number" id="total-count">0</p>
+          <p class="card-subtext" id="low-stock-count">0 low stock</p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <form id="add-form" class="add-form">
+          <div class="field">
+            <label for="sku">SKU</label>
+            <input id="sku" name="sku" type="text" placeholder="FG-1001" required />
+          </div>
+          <div class="field">
+            <label for="name">Item Name</label>
+            <input id="name" name="name" type="text" placeholder="Finished Gear Box" required />
+          </div>
+          <div class="field">
+            <label for="quantity">Quantity</label>
+            <input
+              id="quantity"
+              name="quantity"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="120"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="reorder">Reorder Level</label>
+            <input
+              id="reorder"
+              name="reorder"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="20"
+            />
+          </div>
+          <button class="primary" type="submit">Add Product</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="table-header">
+          <div>
+            <h2>Import From Excel</h2>
+            <p class="hint">Upload a CSV exported from Excel with columns: sku,name,quantity,reorder_level.</p>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="import-file" type="file" accept=".csv" />
+          <button class="ghost" id="import-button" type="button">Import CSV</button>
+        </div>
+        <div id="import-status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Inventory Table</h2>
+            <p class="hint">Click any field to edit. Changes save automatically.</p>
+          </div>
+          <div class="filters">
+            <input id="search" type="search" placeholder="Search SKU or name" data-readonly-allow="true" />
+            <select id="stock-filter">
+              <option value="all">All stock</option>
+              <option value="low">Low stock</option>
+              <option value="ok">In stock</option>
+            </select>
+            <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+          </div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Final goods inventory">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Quantity</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="table-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Rejected Items Log</h2>
+            <p class="hint">Rejected pieces captured during dispatch QC.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Rejected items log">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">Item</span>
+            <span role="columnheader">Rejected Qty</span>
+            <span role="columnheader">QC By</span>
+            <span role="columnheader">Date</span>
+          </div>
+          <div id="rejected-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const tableBody = document.getElementById("table-body");
+      const totalCount = document.getElementById("total-count");
+      const lowStockCount = document.getElementById("low-stock-count");
+      const addForm = document.getElementById("add-form");
+      const searchInput = document.getElementById("search");
+      const filterSelect = document.getElementById("stock-filter");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("status");
+      const importFile = document.getElementById("import-file");
+      const importButton = document.getElementById("import-button");
+      const importStatus = document.getElementById("import-status");
+      const rejectedBody = document.getElementById("rejected-body");
+      const rejectedLogKey = "final_good_rejected_log";
+
+      let items = [];
+      const pendingTimers = new Map();
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const setImportStatus = (message, type = "info") => {
+        importStatus.textContent = message;
+        importStatus.dataset.type = type;
+        importStatus.classList.toggle("visible", Boolean(message));
+      };
+
+      const fetchItems = async () => {
+        setStatus("Loading inventory...");
+        const response = await fetch("/api/items");
+        if (!response.ok) {
+          throw new Error("Failed to load items");
+        }
+        const data = await response.json();
+        items = data;
+        renderItems();
+        setStatus("");
+      };
+
+      const apiUpdate = async (item) => {
+        const response = await fetch(`/api/items/${item.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+        });
+        if (!response.ok) {
+          throw new Error("Update failed");
+        }
+        return response.json();
+      };
+
+      const apiCreate = async (payload) => {
+        const response = await fetch("/api/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.detail || "Create failed");
+        }
+        return response.json();
+      };
+
+      const apiDelete = async (id) => {
+        const response = await fetch(`/api/items/${id}`, { method: "DELETE" });
+        if (!response.ok) {
+          throw new Error("Delete failed");
+        }
+      };
+
+      const updateItem = (id, field, value) => {
+        const index = items.findIndex((item) => item.id === id);
+        if (index === -1) return;
+        const updated = { ...items[index], [field]: value };
+        items[index] = updated;
+
+        const timerKey = `${id}:${field}`;
+        if (pendingTimers.has(timerKey)) {
+          clearTimeout(pendingTimers.get(timerKey));
+        }
+
+        pendingTimers.set(
+          timerKey,
+          setTimeout(async () => {
+            try {
+              await apiUpdate(updated);
+              setStatus("Saved", "success");
+              setTimeout(() => setStatus(""), 1200);
+            } catch (error) {
+              setStatus("Could not save changes", "error");
+              await fetchItems();
+            }
+          }, 400)
+        );
+        renderItems();
+      };
+
+      const removeItem = async (id) => {
+        try {
+          await apiDelete(id);
+          items = items.filter((item) => item.id !== id);
+          renderItems();
+        } catch (error) {
+          setStatus("Could not delete item", "error");
+        }
+      };
+
+      const createCell = (value, type, onChange, placeholder) => {
+        const input = document.createElement("input");
+        input.value = value ?? "";
+        input.type = type;
+        if (placeholder) input.placeholder = placeholder;
+        if (type === "number") {
+          input.min = "0";
+          input.step = "1";
+        }
+        input.addEventListener("input", (event) => onChange(event.target.value));
+        return input;
+      };
+
+      const getReorderLevel = (item) => Number(item.reorder_level ?? 0);
+      const getQuantity = (item) => Number(item.quantity ?? 0);
+
+      const matchesFilter = (item, query, filter) => {
+        const normalized = query.trim().toLowerCase();
+        const sku = String(item.sku || "").toLowerCase();
+        const name = String(item.name || "").toLowerCase();
+        const matchesText = !normalized || sku.includes(normalized) || name.includes(normalized);
+        if (!matchesText) return false;
+
+        const lowStock = getQuantity(item) <= getReorderLevel(item);
+        if (filter === "low") return lowStock;
+        if (filter === "ok") return !lowStock;
+        return true;
+      };
+
+      const renderItems = () => {
+        const query = searchInput.value || "";
+        const filter = filterSelect.value;
+        const filtered = items.filter((item) => matchesFilter(item, query, filter));
+
+        tableBody.innerHTML = "";
+        filtered.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const lowStock = getQuantity(item) <= getReorderLevel(item);
+          if (lowStock) {
+            row.classList.add("low-stock");
+          }
+
+          const skuCell = createCell(item.sku, "text", (value) =>
+            updateItem(item.id, "sku", value)
+          );
+          const nameCell = createCell(item.name, "text", (value) =>
+            updateItem(item.id, "name", value)
+          );
+          const qtyCell = createCell(item.quantity, "number", (value) =>
+            updateItem(item.id, "quantity", Number(value) || 0)
+          );
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+
+          const reorderWrap = document.createElement("div");
+          reorderWrap.className = "reorder";
+          const reorderLabel = document.createElement("span");
+          reorderLabel.textContent = "Reorder";
+          const reorderInput = createCell(getReorderLevel(item), "number", (value) =>
+            updateItem(item.id, "reorder_level", Number(value) || 0)
+          );
+          reorderWrap.appendChild(reorderLabel);
+          reorderWrap.appendChild(reorderInput);
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "danger";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", () => removeItem(item.id));
+
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = lowStock ? "Low stock" : "OK";
+
+          actionCell.appendChild(badge);
+          actionCell.appendChild(reorderWrap);
+          actionCell.appendChild(removeButton);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(actionCell);
+
+          tableBody.appendChild(row);
+        });
+
+        const lowStockItems = items.filter(
+          (item) => getQuantity(item) <= getReorderLevel(item)
+        );
+        totalCount.textContent = items.length;
+        lowStockCount.textContent = `${lowStockItems.length} low stock`;
+      };
+
+      const parseCsv = (text) => {
+        const lines = text.split(/\r?\n/).filter((line) => line.trim().length);
+        if (!lines.length) return [];
+        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+        const rows = [];
+        for (let i = 1; i < lines.length; i += 1) {
+          const cols = lines[i].split(",").map((c) => c.trim());
+          const row = {};
+          headers.forEach((h, idx) => {
+            row[h] = cols[idx] ?? "";
+          });
+          rows.push(row);
+        }
+        return rows;
+      };
+
+      const renderRejectedLog = () => {
+        let entries = [];
+        try {
+          const raw = localStorage.getItem(rejectedLogKey);
+          entries = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          entries = [];
+        }
+        rejectedBody.innerHTML = "";
+        if (!entries.length) {
+          rejectedBody.innerHTML = '<p class="hint">No rejected items logged yet.</p>';
+          return;
+        }
+        entries.forEach((entry, index) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+          row.style.animationDelay = `${index * 40}ms`;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = entry.name;
+          nameCell.readOnly = true;
+
+          const qtyCell = document.createElement("input");
+          qtyCell.value = entry.qty;
+          qtyCell.readOnly = true;
+
+          const qcCell = document.createElement("input");
+          qcCell.value = entry.qc;
+          qcCell.readOnly = true;
+
+          const dateCell = document.createElement("input");
+          dateCell.value = entry.date;
+          dateCell.readOnly = true;
+
+          row.appendChild(nameCell);
+          row.appendChild(qtyCell);
+          row.appendChild(qcCell);
+          row.appendChild(dateCell);
+          rejectedBody.appendChild(row);
+        });
+      };
+
+      addForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(addForm);
+        const sku = String(formData.get("sku") || "").trim();
+        const name = String(formData.get("name") || "").trim();
+        const quantity = Number(formData.get("quantity") || 0);
+        const reorderLevel = Number(formData.get("reorder") || 0);
+
+        if (!sku || !name) return;
+
+        try {
+          const created = await apiCreate({
+            sku,
+            name,
+            quantity: Number.isFinite(quantity) ? Math.max(0, quantity) : 0,
+            reorder_level: Number.isFinite(reorderLevel)
+              ? Math.max(0, reorderLevel)
+              : 0,
+            unit: "pcs",
+            active: true,
+          });
+          items = [created, ...items];
+          renderItems();
+          addForm.reset();
+          setStatus("Item added", "success");
+          setTimeout(() => setStatus(""), 1200);
+        } catch (error) {
+          setStatus(error.message || "Could not add item", "error");
+        }
+      });
+
+      searchInput.addEventListener("input", renderItems);
+      filterSelect.addEventListener("change", renderItems);
+      refreshButton.addEventListener("click", () => fetchItems());
+
+      importButton.addEventListener("click", async () => {
+        const file = importFile.files?.[0];
+        if (!file) {
+          setImportStatus("Select a CSV file first.", "error");
+          return;
+        }
+        const text = await file.text();
+        const rows = parseCsv(text);
+        if (!rows.length) {
+          setImportStatus("CSV has no rows.", "error");
+          return;
+        }
+        try {
+          const existing = await fetch("/api/items").then((res) => res.json());
+          const bySku = new Map(existing.map((item) => [item.sku, item]));
+          for (const row of rows) {
+            const sku = row.sku?.trim();
+            const name = row.name?.trim();
+            if (!sku || !name) continue;
+            const payload = {
+              sku,
+              name,
+              quantity: Number(row.quantity || 0),
+              reorder_level: Number(row.reorder_level || 0),
+              unit: "pcs",
+              active: true,
+            };
+            if (bySku.has(sku)) {
+              const current = bySku.get(sku);
+              await fetch(`/api/items/${current.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+            } else {
+              await fetch("/api/items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+            }
+          }
+          await fetchItems();
+          setImportStatus("Import complete.", "success");
+          setTimeout(() => setImportStatus(""), 1500);
+        } catch (error) {
+          setImportStatus("Import failed.", "error");
+        }
+      });
+
+      fetchItems().catch(() => setStatus("Unable to load inventory", "error"));
+      renderRejectedLog();
+    </script>
+  </body>
+</html>

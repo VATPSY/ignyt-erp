@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BOMs</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="boms">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>BOM's</h1>
+          <p class="subtitle">
+            Pick a final product, add multiple raw materials with quantities, then save.
+          </p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel">
+        <form id="bom-form" class="add-form">
+          <div class="field">
+            <label for="final-item">Final Good</label>
+            <select id="final-item" name="finalItem" required></select>
+          </div>
+        </form>
+
+        <div class="table" role="table" aria-label="BOM components">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">Raw Material</span>
+            <span role="columnheader">Quantity Used</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="component-body" class="table-body" role="rowgroup"></div>
+        </div>
+
+        <div class="table-header" style="margin-top: 16px;">
+          <div>
+            <p class="hint">Add as many raw materials as needed, then save the BOM.</p>
+          </div>
+          <div class="filters">
+            <button class="ghost" id="add-row" type="button">Add Component Row</button>
+            <button class="primary" id="save-bom" type="button">Save BOM</button>
+          </div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>BOM Table</h2>
+            <p class="hint">Grouped view of raw materials per finished product.</p>
+          </div>
+          <div class="filters">
+            <input id="search" type="search" placeholder="Search final goods" data-readonly-allow="true" />
+            <button class="ghost" id="refresh" type="button">Refresh</button>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Bill of materials">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">Final Good</span>
+            <span role="columnheader">Raw Material</span>
+            <span role="columnheader">Qty</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="table-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const bomKey = "boms_store";
+      const rawKey = "raw_material_store_items";
+      const tableBody = document.getElementById("table-body");
+      const componentBody = document.getElementById("component-body");
+      const finalSelect = document.getElementById("final-item");
+      const addRowButton = document.getElementById("add-row");
+      const saveBomButton = document.getElementById("save-bom");
+      const searchInput = document.getElementById("search");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("status");
+
+      let finalGoods = [];
+      let rawMaterials = [];
+      let bomEntries = [];
+      let componentRows = [];
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const loadRawMaterials = () => {
+        try {
+          const raw = localStorage.getItem(rawKey);
+          rawMaterials = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          rawMaterials = [];
+        }
+      };
+
+      const loadBoms = () => {
+        try {
+          const raw = localStorage.getItem(bomKey);
+          bomEntries = raw ? JSON.parse(raw) : [];
+        } catch (error) {
+          bomEntries = [];
+        }
+      };
+
+      const saveBoms = () => {
+        localStorage.setItem(bomKey, JSON.stringify(bomEntries));
+      };
+
+      const fetchFinalGoods = async () => {
+        const response = await fetch("/api/items");
+        if (!response.ok) throw new Error("Unable to load final goods");
+        finalGoods = await response.json();
+      };
+
+      const populateSelects = () => {
+        finalSelect.innerHTML = '<option value="">Select final good</option>';
+        finalGoods.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.sku;
+          option.textContent = `${item.sku} — ${item.name}`;
+          finalSelect.appendChild(option);
+        });
+      };
+
+      const buildRawSelect = (value = "") => {
+        const select = document.createElement("select");
+        select.innerHTML = '<option value="">Select raw material</option>';
+        rawMaterials.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.sku;
+          option.textContent = `${item.sku} — ${item.name}`;
+          if (item.sku === value) option.selected = true;
+          select.appendChild(option);
+        });
+        return select;
+      };
+
+      const renderComponentRows = () => {
+        componentBody.innerHTML = "";
+        componentRows.forEach((row, index) => {
+          const rowEl = document.createElement("div");
+          rowEl.className = "table-row";
+          rowEl.style.animationDelay = `${index * 40}ms`;
+
+          const rawCell = document.createElement("div");
+          const rawSelect = buildRawSelect(row.raw_sku);
+          rawSelect.addEventListener("change", (event) => {
+            row.raw_sku = event.target.value;
+          });
+          rawCell.appendChild(rawSelect);
+
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.min = "0";
+          qtyInput.step = "1";
+          qtyInput.placeholder = "0";
+          qtyInput.value = row.quantity;
+          qtyInput.addEventListener("input", (event) => {
+            row.quantity = Number(event.target.value) || 0;
+          });
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "danger";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", () => {
+            componentRows = componentRows.filter((entry) => entry.id !== row.id);
+            renderComponentRows();
+          });
+          actionCell.appendChild(removeButton);
+
+          rowEl.appendChild(rawCell);
+          rowEl.appendChild(qtyInput);
+          rowEl.appendChild(actionCell);
+          componentBody.appendChild(rowEl);
+        });
+      };
+
+      const addComponentRow = () => {
+        componentRows.push({ id: crypto.randomUUID(), raw_sku: "", quantity: 0 });
+        renderComponentRows();
+      };
+
+      const renderBoms = () => {
+        const query = (searchInput.value || "").trim().toLowerCase();
+        const filtered = bomEntries.filter((entry) =>
+          entry.final_name.toLowerCase().includes(query)
+        );
+
+        const groups = new Map();
+        filtered.forEach((entry) => {
+          const key = `${entry.final_sku}||${entry.final_name}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(entry);
+        });
+
+        tableBody.innerHTML = "";
+        Array.from(groups.entries()).forEach(([key, entries], groupIndex) => {
+          const [finalSku, finalName] = key.split("||");
+          const groupRow = document.createElement("div");
+          groupRow.className = "table-row";
+          groupRow.style.animationDelay = `${groupIndex * 40}ms`;
+
+          const finalCell = document.createElement("input");
+          finalCell.value = `${finalSku} — ${finalName}`;
+          finalCell.readOnly = true;
+
+          const rawCell = document.createElement("div");
+          rawCell.className = "bom-list";
+          entries.forEach((entry) => {
+            const line = document.createElement("div");
+            line.textContent = `${entry.raw_sku} — ${entry.raw_name}`;
+            rawCell.appendChild(line);
+          });
+
+          const qtyCell = document.createElement("div");
+          qtyCell.className = "bom-list";
+          entries.forEach((entry) => {
+            const line = document.createElement("div");
+            line.textContent = entry.quantity;
+            qtyCell.appendChild(line);
+          });
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          entries.forEach((entry) => {
+            const removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.className = "danger";
+            removeButton.textContent = `Remove ${entry.raw_sku}`;
+            removeButton.addEventListener("click", () => {
+              bomEntries = bomEntries.filter((item) => item.id !== entry.id);
+              saveBoms();
+              renderBoms();
+            });
+            actionCell.appendChild(removeButton);
+          });
+
+          groupRow.appendChild(finalCell);
+          groupRow.appendChild(rawCell);
+          groupRow.appendChild(qtyCell);
+          groupRow.appendChild(actionCell);
+
+          tableBody.appendChild(groupRow);
+        });
+      };
+
+      addRowButton.addEventListener("click", addComponentRow);
+
+      saveBomButton.addEventListener("click", () => {
+        const finalSku = finalSelect.value;
+        if (!finalSku) {
+          setStatus("Select a final good first.", "error");
+          return;
+        }
+
+        const finalItem = finalGoods.find((item) => item.sku === finalSku);
+        if (!finalItem) {
+          setStatus("Select a valid final good.", "error");
+          return;
+        }
+
+        const validRows = componentRows.filter(
+          (row) => row.raw_sku && Number(row.quantity) > 0
+        );
+        if (!validRows.length) {
+          setStatus("Add at least one raw material with quantity.", "error");
+          return;
+        }
+
+        validRows.forEach((row) => {
+          const rawItem = rawMaterials.find((item) => item.sku === row.raw_sku);
+          if (!rawItem) return;
+          bomEntries.unshift({
+            id: crypto.randomUUID(),
+            final_sku: finalItem.sku,
+            final_name: finalItem.name,
+            raw_sku: rawItem.sku,
+            raw_name: rawItem.name,
+            quantity: row.quantity,
+          });
+        });
+
+        saveBoms();
+        renderBoms();
+        componentRows = [];
+        renderComponentRows();
+        setStatus("BOM saved.", "success");
+        setTimeout(() => setStatus(""), 1200);
+      });
+
+      searchInput.addEventListener("input", renderBoms);
+      refreshButton.addEventListener("click", async () => {
+        try {
+          await fetchFinalGoods();
+          loadRawMaterials();
+          populateSelects();
+          renderBoms();
+        } catch (error) {
+          setStatus("Unable to refresh data.", "error");
+        }
+      });
+
+      const init = async () => {
+        try {
+          await fetchFinalGoods();
+          loadRawMaterials();
+          loadBoms();
+          populateSelects();
+          renderBoms();
+          addComponentRow();
+        } catch (error) {
+          setStatus("Unable to load data.", "error");
+        }
+      };
+
+      init();
+    </script>
+  </body>
+</html>

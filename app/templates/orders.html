@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orders</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="orders">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Orders</h1>
+          <p class="subtitle">History of all purchase order e‑bills.</p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Purchase Order History</h2>
+            <p class="hint">Most recent orders appear first.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="orders-status" class="status" role="status" aria-live="polite"></div>
+        <div id="orders-list" class="orders-list"></div>
+      </section>
+    </div>
+
+    <div id="dispatch-modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Dispatch QC</h2>
+          <p class="hint">Fill QC checks before dispatching the order.</p>
+        </div>
+        <div class="modal-body">
+          <div class="table qc-table">
+            <div class="table-row table-head">
+              <span>SKU</span>
+              <span>Item</span>
+              <span>Ordered</span>
+              <span>Dispatch Qty</span>
+              <span>Rejected ❌</span>
+              <span>Passed ✅</span>
+              <span>Replace?</span>
+            </div>
+            <div id="dispatch-body" class="table-body"></div>
+          </div>
+          <div class="qc-footer">
+            <div class="field">
+              <label for="dispatch-qc-name">QC Name</label>
+              <input id="dispatch-qc-name" type="text" placeholder="Quality checker name" />
+            </div>
+            <div class="field">
+              <label for="dispatch-qc-date">QC Date</label>
+              <input id="dispatch-qc-date" type="date" />
+            </div>
+          </div>
+          <div id="dispatch-status" class="status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="dispatch-submit" class="primary" type="button">Submit QC & Dispatch</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const ordersList = document.getElementById("orders-list");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("orders-status");
+      const dispatchModal = document.getElementById("dispatch-modal");
+      const dispatchBody = document.getElementById("dispatch-body");
+      const dispatchQcName = document.getElementById("dispatch-qc-name");
+      const dispatchQcDate = document.getElementById("dispatch-qc-date");
+      const dispatchStatus = document.getElementById("dispatch-status");
+      const dispatchSubmit = document.getElementById("dispatch-submit");
+      const rejectedLogKey = "final_good_rejected_log";
+      let activeDispatchOrder = null;
+      let activeDispatchLines = [];
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const setDispatchStatus = (message, type = "info") => {
+        dispatchStatus.textContent = message;
+        dispatchStatus.dataset.type = type;
+        dispatchStatus.classList.toggle("visible", Boolean(message));
+      };
+
+      const openDispatchModal = (order) => {
+        activeDispatchOrder = order;
+        activeDispatchLines = order.lines.map((line) => ({
+          sku: line.sku,
+          item_name: line.item_name,
+          ordered: line.quantity,
+          remaining: line.remaining_qty ?? line.quantity,
+          dispatch_qty: line.remaining_qty ?? line.quantity,
+          rejected: "",
+          passed: "",
+          replace: false,
+          replacement_qty: "",
+        }));
+        dispatchBody.innerHTML = "";
+        activeDispatchLines.forEach((line) => {
+          const row = document.createElement("div");
+          row.className = "table-row";
+
+          const skuCell = document.createElement("input");
+          skuCell.value = line.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = line.item_name;
+          nameCell.readOnly = true;
+
+          const orderedCell = document.createElement("input");
+          orderedCell.value = `${line.remaining} / ${line.ordered}`;
+          orderedCell.readOnly = true;
+
+          const dispatchInput = document.createElement("input");
+          dispatchInput.type = "number";
+          dispatchInput.min = "1";
+          dispatchInput.step = "1";
+          dispatchInput.max = line.remaining;
+          dispatchInput.placeholder = "Dispatch Qty";
+          dispatchInput.value = line.dispatch_qty;
+          dispatchInput.addEventListener("input", (event) => {
+            line.dispatch_qty = Number(event.target.value) || 0;
+          });
+
+          const rejectedInput = document.createElement("input");
+          rejectedInput.type = "number";
+          rejectedInput.min = "0";
+          rejectedInput.step = "1";
+          rejectedInput.placeholder = "0";
+          rejectedInput.addEventListener("input", (event) => {
+            line.rejected = event.target.value;
+          });
+
+          const passedInput = document.createElement("input");
+          passedInput.type = "number";
+          passedInput.min = "0";
+          passedInput.step = "1";
+          passedInput.placeholder = "0";
+          passedInput.addEventListener("input", (event) => {
+            line.passed = event.target.value;
+          });
+
+          const replaceWrap = document.createElement("div");
+          replaceWrap.className = "pack-qty";
+          const replaceCheck = document.createElement("input");
+          replaceCheck.type = "checkbox";
+          replaceCheck.addEventListener("change", (event) => {
+            line.replace = event.target.checked;
+            replacementInput.disabled = !event.target.checked;
+          });
+          const replacementInput = document.createElement("input");
+          replacementInput.type = "number";
+          replacementInput.min = "0";
+          replacementInput.step = "1";
+          replacementInput.placeholder = "Qty";
+          replacementInput.disabled = true;
+          replacementInput.addEventListener("input", (event) => {
+            line.replacement_qty = event.target.value;
+          });
+          replaceWrap.appendChild(replaceCheck);
+          replaceWrap.appendChild(replacementInput);
+
+          row.appendChild(skuCell);
+          row.appendChild(nameCell);
+          row.appendChild(orderedCell);
+          row.appendChild(dispatchInput);
+          row.appendChild(rejectedInput);
+          row.appendChild(passedInput);
+          row.appendChild(replaceWrap);
+          dispatchBody.appendChild(row);
+        });
+
+        dispatchQcDate.value = new Date().toISOString().slice(0, 10);
+        dispatchModal.classList.remove("hidden");
+        document.body.classList.add("qc-open");
+      };
+
+      const closeDispatchModal = () => {
+        dispatchModal.classList.add("hidden");
+        document.body.classList.remove("qc-open");
+        dispatchQcName.value = "";
+        dispatchQcDate.value = "";
+        setDispatchStatus("");
+      };
+
+      dispatchSubmit.addEventListener("click", async () => {
+        if (!activeDispatchOrder) return;
+        const qcName = dispatchQcName.value.trim();
+        const qcDate = dispatchQcDate.value;
+        if (!qcName || !qcDate) {
+          setDispatchStatus("QC name and date are required.", "error");
+          return;
+        }
+
+        for (const line of activeDispatchLines) {
+          const rejected = Number(line.rejected);
+          const passed = Number(line.passed);
+          const replacement = Number(line.replacement_qty || 0);
+          const dispatchQty = Number(line.dispatch_qty || 0);
+          if (!Number.isFinite(rejected) || !Number.isFinite(passed)) {
+            setDispatchStatus("Enter passed and rejected quantities for all items.", "error");
+            return;
+          }
+          if (dispatchQty <= 0 || dispatchQty > line.remaining) {
+            setDispatchStatus(`Invalid dispatch qty for ${line.sku}.`, "error");
+            return;
+          }
+          if (rejected < 0 || passed < 0 || rejected + passed !== dispatchQty) {
+            setDispatchStatus(
+              `Rejected + Passed must equal dispatch qty for ${line.sku}.`,
+              "error"
+            );
+            return;
+          }
+          if (line.replace && replacement < 0) {
+            setDispatchStatus("Replacement quantity must be 0 or more.", "error");
+            return;
+          }
+        }
+
+        const payload = {
+          qc_name: qcName,
+          qc_date: qcDate,
+          lines: activeDispatchLines.map((line) => ({
+            sku: line.sku,
+            dispatch_qty: Number(line.dispatch_qty),
+            passed: Number(line.passed),
+            rejected: Number(line.rejected),
+            replaced: Boolean(line.replace),
+            replacement_qty: line.replace ? Number(line.replacement_qty || 0) : 0,
+          })),
+        };
+
+        try {
+          const itemsRes = await fetch("/api/items");
+          if (!itemsRes.ok) throw new Error("Unable to load inventory");
+          const items = await itemsRes.json();
+          const inventoryMap = new Map(items.map((item) => [item.sku, item.quantity]));
+          for (const line of payload.lines) {
+            const required =
+              line.passed + line.rejected + (line.replaced ? line.replacement_qty : 0);
+            const available = inventoryMap.get(line.sku) || 0;
+            if (available < required) {
+              throw new Error(`Insufficient stock for ${line.sku}: ${available} < ${required}`);
+            }
+          }
+
+          const response = await fetch(
+            `/api/purchase-orders/${activeDispatchOrder.id}/approve-dispatch`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            }
+          );
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to dispatch order");
+          }
+
+          // Log rejected items to Final Good Store log (client-side)
+          let rejectedLog = [];
+          try {
+            const raw = localStorage.getItem(rejectedLogKey);
+            rejectedLog = raw ? JSON.parse(raw) : [];
+          } catch (error) {
+            rejectedLog = [];
+          }
+          activeDispatchLines.forEach((line) => {
+            const rejected = Number(line.rejected || 0);
+            if (rejected > 0) {
+              rejectedLog.unshift({
+                id: crypto.randomUUID(),
+                name: `${line.sku} — ${line.item_name}`,
+                qty: rejected,
+                qc: qcName,
+                date: qcDate,
+              });
+            }
+          });
+          localStorage.setItem(rejectedLogKey, JSON.stringify(rejectedLog));
+
+          closeDispatchModal();
+          await fetchOrders();
+        } catch (error) {
+          setDispatchStatus(error.message || "Unable to dispatch order", "error");
+        }
+      });
+
+      const renderOrders = (orders, inventoryMap) => {
+        ordersList.innerHTML = "";
+        if (!orders.length) {
+          ordersList.innerHTML = '<p class="hint">No orders yet.</p>';
+          return;
+        }
+
+        orders.forEach((order, index) => {
+          const canDispatch = order.lines.every(
+            (line) => (inventoryMap.get(line.sku) || 0) >= line.quantity
+          );
+          const card = document.createElement("div");
+          card.className = "order-card";
+          card.style.animationDelay = `${index * 40}ms`;
+
+          const header = document.createElement("div");
+          header.className = "order-header";
+          header.innerHTML = `
+            <div>
+              <h3>PO-${String(order.id).padStart(4, "0")}</h3>
+              <p class="hint">${order.customer_name || "—"} · ${
+            order.sales_person || "—"
+          }</p>
+            </div>
+            <div class="order-meta">
+              <span>${order.status}</span>
+              <span>${canDispatch ? "Ready" : "Waiting Stock"}</span>
+              <strong>${
+                order.order_timestamp
+                  ? new Date(order.order_timestamp).toLocaleString()
+                  : "—"
+              }</strong>
+            </div>
+          `;
+
+          const table = document.createElement("div");
+          table.className = "bill-table";
+          table.innerHTML = `
+            <div class="bill-row bill-head">
+              <span>SKU</span>
+              <span>Item Name</span>
+              <span>Ordered</span>
+              <span>Remaining</span>
+            </div>
+          `;
+
+          const body = document.createElement("div");
+          body.className = "bill-body";
+          order.lines.forEach((line) => {
+            const row = document.createElement("div");
+            row.className = "bill-row";
+            row.innerHTML = `
+              <span>${line.sku}</span>
+              <span>${line.item_name}</span>
+              <span>${line.quantity}</span>
+              <span>${line.remaining_qty ?? line.quantity}</span>
+            `;
+            body.appendChild(row);
+          });
+
+          table.appendChild(body);
+          if (order.status !== "CONFIRMED") {
+            const approveButton = document.createElement("button");
+            approveButton.type = "button";
+            approveButton.className = "primary inline";
+            approveButton.textContent = "Approve & Dispatch";
+            approveButton.disabled = !canDispatch;
+            if (!canDispatch) {
+              approveButton.classList.add("disabled");
+            }
+            approveButton.addEventListener("click", async () => {
+              openDispatchModal(order);
+            });
+            header.appendChild(approveButton);
+          }
+
+          const logButton = document.createElement("button");
+          logButton.type = "button";
+          logButton.className = "ghost";
+          logButton.textContent = "View Dispatch Log";
+          logButton.addEventListener("click", async () => {
+            try {
+              const response = await fetch(`/api/purchase-orders/${order.id}/dispatch-logs`);
+              if (!response.ok) throw new Error("Unable to load dispatch log");
+              const logs = await response.json();
+              const logTable = document.createElement("div");
+              logTable.className = "bill-table";
+              logTable.innerHTML = `
+                <div class="bill-row bill-head">
+                  <span>SKU</span>
+                  <span>Item</span>
+                  <span>Dispatch</span>
+                  <span>Rejected</span>
+                  <span>Passed</span>
+                  <span>QC</span>
+                  <span>Date</span>
+                </div>
+              `;
+              const logBody = document.createElement("div");
+              logBody.className = "bill-body";
+              logs.forEach((log) => {
+                const row = document.createElement("div");
+                row.className = "bill-row";
+                row.innerHTML = `
+                  <span>${log.sku}</span>
+                  <span>${log.item_name}</span>
+                  <span>${log.dispatch_qty}</span>
+                  <span>${log.rejected_qty}</span>
+                  <span>${log.passed_qty}</span>
+                  <span>${log.qc_name}</span>
+                  <span>${new Date(log.created_at).toLocaleString()}</span>
+                `;
+                logBody.appendChild(row);
+              });
+              logTable.appendChild(logBody);
+              card.appendChild(logTable);
+            } catch (error) {
+              setStatus(error.message || "Unable to load dispatch log", "error");
+            }
+          });
+          header.appendChild(logButton);
+
+          card.appendChild(header);
+          card.appendChild(table);
+          ordersList.appendChild(card);
+        });
+      };
+
+      const fetchOrders = async () => {
+        setStatus("Loading orders...");
+        try {
+          const [ordersRes, itemsRes] = await Promise.all([
+            fetch("/api/purchase-orders/with-lines"),
+            fetch("/api/items"),
+          ]);
+          if (!ordersRes.ok) throw new Error("Unable to load orders");
+          if (!itemsRes.ok) throw new Error("Unable to load inventory");
+          const data = await ordersRes.json();
+          const items = await itemsRes.json();
+          const inventoryMap = new Map(items.map((item) => [item.sku, item.quantity]));
+          renderOrders(data, inventoryMap);
+          setStatus("");
+        } catch (error) {
+          setStatus("Unable to load orders", "error");
+        }
+      };
+
+      refreshButton.addEventListener("click", fetchOrders);
+      fetchOrders();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Assembly Line</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-module-key="assembly_line">
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Manufacturing ERP</p>
+          <h1>Assembly Line</h1>
+          <p class="subtitle">
+            Move produced quantities into assembly and send completed quantities to packaging.
+          </p>
+        </div>
+      
+        <a class="ghost" href="/">Back to Dashboard</a>
+      </header>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Assembly Queue</h2>
+            <p class="hint">Generated automatically when production is marked Produce.</p>
+          </div>
+          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+        </div>
+        <div id="assembly-status" class="status" role="status" aria-live="polite"></div>
+        <div class="table" role="table" aria-label="Assembly queue">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Assembled / Total</span>
+            <span role="columnheader">First Part Check</span>
+            <span role="columnheader">Actions</span>
+          </div>
+          <div id="assembly-body" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Assembly History</h2>
+            <p class="hint">Completed assembly batches moved here.</p>
+          </div>
+        </div>
+        <div class="table" role="table" aria-label="Assembly history">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">SKU</span>
+            <span role="columnheader">Item Name</span>
+            <span role="columnheader">Assembled / Total</span>
+            <span role="columnheader">Status</span>
+          </div>
+          <div id="assembly-history" class="table-body" role="rowgroup"></div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/permissions.js"></script>
+    <script src="/static/ui.js"></script>
+    <script>
+      const bodyEl = document.getElementById("assembly-body");
+      const historyEl = document.getElementById("assembly-history");
+      const refreshButton = document.getElementById("refresh");
+      const statusEl = document.getElementById("assembly-status");
+      const firstPartKey = "first_part_qc_log";
+
+      let assembly = [];
+
+      const setStatus = (message, type = "info") => {
+        statusEl.textContent = message;
+        statusEl.dataset.type = type;
+        statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const renderAssembly = () => {
+        bodyEl.innerHTML = "";
+        historyEl.innerHTML = "";
+        const active = assembly.filter((row) => row.status !== "DONE");
+        const completed = assembly.filter((row) => row.status === "DONE");
+
+        active.forEach((row, index) => {
+          const rowEl = document.createElement("div");
+          rowEl.className = "table-row";
+          rowEl.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = row.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = row.item_name;
+          nameCell.readOnly = true;
+
+          const qtyWrap = document.createElement("div");
+          qtyWrap.className = "pack-qty";
+          const qtyInput = document.createElement("input");
+          qtyInput.type = "number";
+          qtyInput.min = "0";
+          qtyInput.max = row.qty_total;
+          qtyInput.step = "1";
+          qtyInput.value = row.qty_assembled;
+          const qtyTotal = document.createElement("span");
+          qtyTotal.textContent = ` / ${row.qty_total}`;
+          qtyWrap.appendChild(qtyInput);
+          qtyWrap.appendChild(qtyTotal);
+
+          const checkCell = document.createElement("div");
+          checkCell.className = "actions";
+          const checkBox = document.createElement("input");
+          checkBox.type = "checkbox";
+          checkBox.checked = row.first_part_checked || false;
+          checkCell.appendChild(checkBox);
+
+          const actionCell = document.createElement("div");
+          actionCell.className = "actions";
+          const statusSelect = document.createElement("select");
+          ["PLANNED", "IN_PROGRESS", "DONE"].forEach((status) => {
+            const option = document.createElement("option");
+            option.value = status;
+            option.textContent = status.replace("_", " ");
+            if (row.status === status) option.selected = true;
+            statusSelect.appendChild(option);
+          });
+          const updateButton = document.createElement("button");
+          updateButton.type = "button";
+          updateButton.className = "primary";
+          updateButton.textContent = "Update";
+          updateButton.addEventListener("click", async () => {
+            const newQty = Number(qtyInput.value) || 0;
+            const newStatus = statusSelect.value;
+            if (!checkBox.checked) {
+              setStatus("Complete first part checking before updating.", "error");
+              return;
+            }
+            try {
+              const raw = localStorage.getItem(firstPartKey);
+              const log = raw ? JSON.parse(raw) : [];
+              log.unshift({
+                sku: row.sku,
+                item: row.item_name,
+                status: "Checked",
+                date: new Date().toLocaleString(),
+              });
+              localStorage.setItem(firstPartKey, JSON.stringify(log));
+
+              const response = await fetch(`/api/assembly/${row.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ qty_assembled: newQty, status: newStatus }),
+              });
+              if (!response.ok) {
+                const detail = await response.json().catch(() => ({}));
+                throw new Error(detail.detail || "Unable to update assembly");
+              }
+              const updated = await response.json();
+              assembly = assembly.map((entry) => (entry.id === updated.id ? updated : entry));
+              await fetchAssembly();
+              setStatus("Assembly updated.", "success");
+              setTimeout(() => setStatus(""), 1200);
+            } catch (error) {
+              setStatus(error.message || "Unable to update assembly", "error");
+            }
+          });
+
+          actionCell.appendChild(statusSelect);
+          actionCell.appendChild(updateButton);
+
+          rowEl.appendChild(skuCell);
+          rowEl.appendChild(nameCell);
+          rowEl.appendChild(qtyWrap);
+          rowEl.appendChild(checkCell);
+          rowEl.appendChild(actionCell);
+          bodyEl.appendChild(rowEl);
+        });
+
+        completed.forEach((row, index) => {
+          const rowEl = document.createElement("div");
+          rowEl.className = "table-row";
+          rowEl.style.animationDelay = `${index * 40}ms`;
+
+          const skuCell = document.createElement("input");
+          skuCell.value = row.sku;
+          skuCell.readOnly = true;
+
+          const nameCell = document.createElement("input");
+          nameCell.value = row.item_name;
+          nameCell.readOnly = true;
+
+          const qtyWrap = document.createElement("div");
+          qtyWrap.className = "pack-qty";
+          const qtyInput = document.createElement("input");
+          qtyInput.value = row.qty_assembled;
+          qtyInput.readOnly = true;
+          const qtyTotal = document.createElement("span");
+          qtyTotal.textContent = ` / ${row.qty_total}`;
+          qtyWrap.appendChild(qtyInput);
+          qtyWrap.appendChild(qtyTotal);
+
+          const statusCell = document.createElement("input");
+          statusCell.value = "DONE";
+          statusCell.readOnly = true;
+
+          rowEl.appendChild(skuCell);
+          rowEl.appendChild(nameCell);
+          rowEl.appendChild(qtyWrap);
+          rowEl.appendChild(statusCell);
+          historyEl.appendChild(rowEl);
+        });
+      };
+
+      const fetchAssembly = async () => {
+        setStatus("Loading assembly queue...");
+        try {
+          const response = await fetch("/api/assembly");
+          if (!response.ok) throw new Error("Unable to load assembly");
+          assembly = await response.json();
+          renderAssembly();
+          setStatus("");
+        } catch (error) {
+          setStatus("Unable to load assembly", "error");
+        }
+      };
+
+      refreshButton.addEventListener("click", fetchAssembly);
+      fetchAssembly();
+    </script>
+  </body>
+</html>

@@ -17,6 +17,17 @@
       
         <a class="ghost" href="/">Back to Dashboard</a>
       </header>
+      <section class="panel">
+        <div class="table-header">
+          <div>
+            <h2>QC Controls</h2>
+            <p class="hint">Admin-only controls for clearing QC logs.</p>
+          </div>
+          <button class="danger" id="clear-qc" type="button" style="display:none;">
+            Clear QC Logs
+          </button>
+        </div>
+      </section>
 
       <section class="panel table-panel">
         <div class="table-header">
@@ -82,6 +93,7 @@
       const firstPartKey = "first_part_qc_log";
       const rawRejectedKey = "raw_material_rejected_log";
       const dispatchQcKey = "dispatch_qc_log";
+      const clearButton = document.getElementById("clear-qc");
 
       const firstPartBody = document.getElementById("first-part-body");
       const rawQcBody = document.getElementById("raw-qc-body");
@@ -161,6 +173,49 @@
         "__photo",
         "date",
       ]);
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
+      };
+
+      clearButton.addEventListener("click", () => {
+        if (!confirm("Clear all QC logs?")) return;
+        localStorage.setItem(firstPartKey, JSON.stringify([]));
+        localStorage.setItem(rawRejectedKey, JSON.stringify([]));
+        localStorage.setItem(dispatchQcKey, JSON.stringify([]));
+        renderLog(firstPartKey, firstPartBody, "No first part checks logged.", [
+          "sku",
+          "item",
+          "status",
+          "qc",
+          "__photo",
+          "date",
+        ]);
+        renderLog(rawRejectedKey, rawQcBody, "No raw material QC logs yet.", [
+          "material",
+          "qty",
+          "qc_by",
+          "date",
+        ]);
+        renderLog(dispatchQcKey, dispatchQcBody, "No dispatch QC logs yet.", [
+          "order_id",
+          "rejected_qty",
+          "qc",
+          "__photo",
+          "date",
+        ]);
+      });
+
+      initAdminActions();
     </script>
   </body>
 </html>

@@ -26,7 +26,12 @@
             <h2>Packaging Queue</h2>
             <p class="hint">Generated automatically from completed production plans.</p>
           </div>
-          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+          <div class="filters">
+            <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+            <button class="danger" id="clear-packaging" type="button" style="display:none;">
+              Clear Packaging
+            </button>
+          </div>
         </div>
         <div id="pack-status" class="status" role="status" aria-live="polite"></div>
         <div class="table" role="table" aria-label="Packaging queue">
@@ -66,6 +71,7 @@
       const refreshButton = document.getElementById("refresh");
       const statusEl = document.getElementById("pack-status");
       const historyBody = document.getElementById("history-body");
+      const clearButton = document.getElementById("clear-packaging");
 
       let packaging = [];
 
@@ -73,6 +79,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const renderPackaging = () => {
@@ -206,6 +225,22 @@
       };
 
       refreshButton.addEventListener("click", fetchPackaging);
+      clearButton.addEventListener("click", async () => {
+        if (!confirm("This will delete ALL packaging data. Continue?")) return;
+        try {
+          const response = await fetch("/api/admin/clear?scope=packaging", { method: "POST" });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to clear packaging");
+          }
+          await fetchPackaging();
+          setStatus("Packaging cleared.", "success");
+          setTimeout(() => setStatus(""), 1200);
+        } catch (error) {
+          setStatus(error.message || "Unable to clear packaging", "error");
+        }
+      });
+      initAdminActions();
       fetchPackaging();
     </script>
   </body>

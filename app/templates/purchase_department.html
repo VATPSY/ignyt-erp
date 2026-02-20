@@ -31,7 +31,12 @@
             <h2>Reorder Queue</h2>
             <p class="hint">Quantities are suggested to reach minimum level.</p>
           </div>
-          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+          <div class="filters">
+            <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+            <button class="danger" id="clear-purchase" type="button" style="display:none;">
+              Clear Purchase Data
+            </button>
+          </div>
         </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
         <div class="table" role="table" aria-label="Raw material reorder queue">
@@ -104,6 +109,7 @@
       const logBody = document.getElementById("log-body");
       const lowCount = document.getElementById("low-count");
       const refreshButton = document.getElementById("refresh");
+      const clearButton = document.getElementById("clear-purchase");
       const statusEl = document.getElementById("status");
       const logKey = "raw_material_reorder_log";
       const qcPendingKey = "raw_material_qc_pending";
@@ -116,6 +122,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const loadItems = () => {
@@ -393,6 +412,18 @@
         renderLog();
         populateManualItems();
       });
+      clearButton.addEventListener("click", () => {
+        if (!confirm("Clear all purchase department data?")) return;
+        localStorage.setItem(queueKey, JSON.stringify([]));
+        localStorage.setItem(logKey, JSON.stringify([]));
+        localStorage.setItem(qcPendingKey, JSON.stringify([]));
+        renderQueue();
+        renderLog();
+        populateManualItems();
+        setStatus("Purchase data cleared.", "success");
+        setTimeout(() => setStatus(""), 1200);
+      });
+      initAdminActions();
       renderQueue();
       renderLog();
       populateManualItems();

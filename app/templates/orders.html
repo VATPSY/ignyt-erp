@@ -24,7 +24,12 @@
             <h2>Purchase Order History</h2>
             <p class="hint">Most recent orders appear first.</p>
           </div>
-          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+          <div class="filters">
+            <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+            <button class="danger" id="clear-orders" type="button" style="display:none;">
+              Clear Orders
+            </button>
+          </div>
         </div>
         <div id="orders-status" class="status" role="status" aria-live="polite"></div>
         <div id="orders-list" class="orders-list"></div>
@@ -77,6 +82,7 @@
     <script>
       const ordersList = document.getElementById("orders-list");
       const refreshButton = document.getElementById("refresh");
+      const clearOrdersButton = document.getElementById("clear-orders");
       const statusEl = document.getElementById("orders-status");
       const dispatchModal = document.getElementById("dispatch-modal");
       const dispatchBody = document.getElementById("dispatch-body");
@@ -94,6 +100,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearOrdersButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const setDispatchStatus = (message, type = "info") => {
@@ -499,6 +518,22 @@
       };
 
       refreshButton.addEventListener("click", fetchOrders);
+      clearOrdersButton.addEventListener("click", async () => {
+        if (!confirm("This will delete ALL orders and dispatch logs. Continue?")) return;
+        try {
+          const response = await fetch("/api/admin/clear?scope=orders", { method: "POST" });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to clear orders");
+          }
+          await fetchOrders();
+          setStatus("Orders cleared.", "success");
+          setTimeout(() => setStatus(""), 1200);
+        } catch (error) {
+          setStatus(error.message || "Unable to clear orders", "error");
+        }
+      });
+      initAdminActions();
       fetchOrders();
     </script>
   </body>

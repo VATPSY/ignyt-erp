@@ -57,7 +57,12 @@
             <h2>Production Plan</h2>
             <p class="hint">All items scheduled for production.</p>
           </div>
-          <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+          <div class="filters">
+            <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+            <button class="danger" id="clear-production" type="button" style="display:none;">
+              Clear Production
+            </button>
+          </div>
         </div>
         <div id="prod-status" class="status" role="status" aria-live="polite"></div>
         <div class="table" role="table" aria-label="Production plan">
@@ -99,6 +104,7 @@
       const completedBody = document.getElementById("completed-body");
       const refreshButton = document.getElementById("refresh");
       const statusEl = document.getElementById("prod-status");
+      const clearButton = document.getElementById("clear-production");
 
       let items = [];
       let plans = [];
@@ -112,6 +118,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const fetchInventory = async () => {
@@ -477,6 +496,21 @@
       refreshButton.addEventListener("click", () => {
         fetchPlans().catch(() => setStatus("Unable to load plan", "error"));
       });
+      clearButton.addEventListener("click", async () => {
+        if (!confirm("This will delete ALL production plans. Continue?")) return;
+        try {
+          const response = await fetch("/api/admin/clear?scope=production", { method: "POST" });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to clear production");
+          }
+          await fetchPlans();
+          setStatus("Production cleared.", "success");
+          setTimeout(() => setStatus(""), 1200);
+        } catch (error) {
+          setStatus(error.message || "Unable to clear production", "error");
+        }
+      });
 
       const init = async () => {
         try {
@@ -487,6 +521,7 @@
         }
       };
 
+      initAdminActions();
       init();
     </script>
   </body>

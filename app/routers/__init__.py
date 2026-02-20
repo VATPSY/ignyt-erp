@@ -1,4 +1,5 @@
 from . import (
+    admin,
     assembly,
     backups,
     customers,
@@ -15,6 +16,7 @@ from . import (
 __all__ = [
     "customers",
     "inventory",
+    "admin",
     "assembly",
     "backups",
     "packaging",

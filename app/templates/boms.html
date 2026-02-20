@@ -58,6 +58,9 @@
           <div class="filters">
             <input id="search" type="search" placeholder="Search final goods" data-readonly-allow="true" />
             <button class="ghost" id="refresh" type="button">Refresh</button>
+            <button class="danger" id="clear-boms" type="button" style="display:none;">
+              Clear BOMs
+            </button>
           </div>
         </div>
         <div class="table" role="table" aria-label="Bill of materials">
@@ -84,6 +87,7 @@
       const saveBomButton = document.getElementById("save-bom");
       const searchInput = document.getElementById("search");
       const refreshButton = document.getElementById("refresh");
+      const clearButton = document.getElementById("clear-boms");
       const statusEl = document.getElementById("status");
 
       let finalGoods = [];
@@ -95,6 +99,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const loadRawMaterials = () => {
@@ -315,6 +332,13 @@
           setStatus("Unable to refresh data.", "error");
         }
       });
+      clearButton.addEventListener("click", () => {
+        if (!confirm("Clear all BOM entries?")) return;
+        localStorage.setItem(bomKey, JSON.stringify([]));
+        renderBoms();
+        setStatus("BOMs cleared.", "success");
+        setTimeout(() => setStatus(""), 1200);
+      });
 
       const init = async () => {
         try {
@@ -329,6 +353,7 @@
         }
       };
 
+      initAdminActions();
       init();
     </script>
   </body>

@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from app.db import init_db, engine
 from app.routers import (
+    admin,
     assembly,
     backups,
     customers,
@@ -177,4 +178,5 @@ app.include_router(purchase_orders.router)
 app.include_router(reports.router)
 app.include_router(media.router)
 app.include_router(backups.router)
+app.include_router(admin.router)
 app.include_router(auth_router)

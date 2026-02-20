@@ -89,7 +89,9 @@
               <option value="low">Low stock</option>
               <option value="ok">In stock</option>
             </select>
-            <button class="ghost" id="clear-all" type="button">Clear All</button>
+            <button class="danger" id="clear-all" type="button" style="display:none;">
+              Clear Raw Store
+            </button>
           </div>
         </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -219,6 +221,19 @@
         qcStatus.textContent = message;
         qcStatus.dataset.type = type;
         qcStatus.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearAllButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const loadItems = () => {
@@ -690,7 +705,11 @@
         saveItems([]);
         saveSnapshot([]);
         saveQcPending([]);
+        saveLog(usageLogKey, []);
+        saveLog(rejectedLogKey, []);
         renderItems([]);
+        renderUsageLog();
+        renderRejectedLog();
       });
 
       searchInput.addEventListener("input", () => renderItems(loadItems()));
@@ -732,6 +751,7 @@
       });
 
       const init = () => {
+        initAdminActions();
         const items = loadItems();
         renderItems(items);
         if (!loadSnapshot().length) {

@@ -91,6 +91,9 @@
               <option value="ok">In stock</option>
             </select>
             <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
+            <button class="danger" id="clear-inventory" type="button" style="display:none;">
+              Clear Inventory
+            </button>
           </div>
         </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -134,6 +137,7 @@
       const searchInput = document.getElementById("search");
       const filterSelect = document.getElementById("stock-filter");
       const refreshButton = document.getElementById("refresh");
+      const clearButton = document.getElementById("clear-inventory");
       const statusEl = document.getElementById("status");
       const importFile = document.getElementById("import-file");
       const importButton = document.getElementById("import-button");
@@ -148,6 +152,19 @@
         statusEl.textContent = message;
         statusEl.dataset.type = type;
         statusEl.classList.toggle("visible", Boolean(message));
+      };
+
+      const initAdminActions = async () => {
+        try {
+          const response = await fetch("/api/me");
+          if (!response.ok) return;
+          const me = await response.json();
+          if (me.permissions && me.permissions.includes("*")) {
+            clearButton.style.display = "inline-flex";
+          }
+        } catch (error) {
+          // ignore
+        }
       };
 
       const setImportStatus = (message, type = "info") => {
@@ -426,6 +443,21 @@
       searchInput.addEventListener("input", renderItems);
       filterSelect.addEventListener("change", renderItems);
       refreshButton.addEventListener("click", () => fetchItems());
+      clearButton.addEventListener("click", async () => {
+        if (!confirm("This will delete ALL final goods inventory. Continue?")) return;
+        try {
+          const response = await fetch("/api/items/clear", { method: "POST" });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.detail || "Unable to clear inventory");
+          }
+          await fetchItems();
+          setStatus("Inventory cleared.", "success");
+          setTimeout(() => setStatus(""), 1200);
+        } catch (error) {
+          setStatus(error.message || "Unable to clear inventory", "error");
+        }
+      });
 
       importButton.addEventListener("click", async () => {
         const file = importFile.files?.[0];
@@ -477,6 +509,7 @@
         }
       });
 
+      initAdminActions();
       fetchItems().catch(() => setStatus("Unable to load inventory", "error"));
       renderRejectedLog();
     </script>

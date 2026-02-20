@@ -1,12 +1,12 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlmodel import Session, select
+from sqlmodel import Session, select, delete
 
 from app.db import get_session
-from app.models import Item
+from app.models import Item, StockLedger
 from app.schemas import ItemCreate
-from app.routers.auth import require_any_permission, require_permission
+from app.routers.auth import get_current_user, require_any_permission, require_permission
 
 router = APIRouter(prefix="/api/items", tags=["inventory"])
 
@@ -63,5 +63,16 @@ def delete_item(item_id: int, request: Request, session: Session = Depends(get_s
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     session.delete(item)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/clear")
+def clear_inventory(request: Request, session: Session = Depends(get_session)):
+    user = get_current_user(request, session)
+    if not user or user.permissions != "*":
+        raise HTTPException(status_code=403, detail="Admin only")
+    session.exec(delete(StockLedger))
+    session.exec(delete(Item))
     session.commit()
     return {"ok": True}

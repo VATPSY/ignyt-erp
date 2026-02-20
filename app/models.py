@@ -102,6 +102,9 @@ class DispatchLog(SQLModel, table=True):
     dispatch_qty: int
     rejected_qty: int
     passed_qty: int
+    proof_public_id: Optional[str] = None
+    proof_version: Optional[str] = None
+    proof_format: Optional[str] = None
     qc_name: str
     qc_date: str
     created_at: datetime = Field(default_factory=datetime.utcnow)

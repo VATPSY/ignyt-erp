@@ -18,6 +18,8 @@ def _period_from_range(range_key: str) -> tuple[datetime, datetime]:
         start = datetime.combine(today, time.min)
     elif range_key == "weekly":
         start = datetime.combine(today - timedelta(days=6), time.min)
+    elif range_key == "monthly":
+        start = datetime.combine(today - timedelta(days=29), time.min)
     else:
         raise HTTPException(status_code=400, detail="Invalid range")
     end = datetime.now()
@@ -27,7 +29,7 @@ def _period_from_range(range_key: str) -> tuple[datetime, datetime]:
 @router.get("/production", response_model=ProductionReportResponse)
 def production_report(
     request: Request,
-    range: str = Query("daily", regex="^(daily|weekly)$"),
+    range: str = Query("daily", regex="^(daily|weekly|monthly)$"),
     session: Session = Depends(get_session),
 ):
     require_permission(request, session, "production_reports", "read")
@@ -110,3 +112,39 @@ def production_report(
             rejected=totals["rejected"],
         ),
     )
+
+
+@router.get("/summary")
+def production_summary(
+    request: Request,
+    range: str = Query("weekly", regex="^(weekly|monthly)$"),
+    session: Session = Depends(get_session),
+):
+    require_permission(request, session, "production_reports", "read")
+    start, end = _period_from_range(range)
+
+    produced_rows = session.exec(
+        select(PackagingOrder).where(
+            PackagingOrder.status == "DONE",
+            PackagingOrder.completed_at.is_not(None),
+            PackagingOrder.completed_at >= start,
+            PackagingOrder.completed_at <= end,
+        )
+    ).all()
+    produced = sum(int(pack.qty_packed) for pack in produced_rows)
+
+    dispatch_rows = session.exec(
+        select(DispatchLog).where(DispatchLog.created_at >= start, DispatchLog.created_at <= end)
+    ).all()
+    dispatched = sum(int(log.dispatch_qty) for log in dispatch_rows)
+    rejected = sum(int(log.rejected_qty) for log in dispatch_rows)
+    rejection_rate = (rejected / dispatched * 100) if dispatched > 0 else 0.0
+
+    return {
+        "start": start,
+        "end": end,
+        "produced": produced,
+        "dispatched": dispatched,
+        "rejected": rejected,
+        "rejection_rate": round(rejection_rate, 2),
+    }

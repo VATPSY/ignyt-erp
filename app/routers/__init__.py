@@ -1,7 +1,9 @@
 from . import (
     assembly,
+    backups,
     customers,
     inventory,
+    media,
     packaging,
     production,
     purchase_orders,
@@ -14,10 +16,12 @@ __all__ = [
     "customers",
     "inventory",
     "assembly",
+    "backups",
     "packaging",
     "production",
     "purchase_orders",
     "reports",
+    "media",
     "sales_orders",
     "vendors",
 ]

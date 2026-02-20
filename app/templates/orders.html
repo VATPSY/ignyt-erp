@@ -59,6 +59,10 @@
               <label for="dispatch-qc-date">QC Date</label>
               <input id="dispatch-qc-date" type="date" />
             </div>
+            <div class="field">
+              <label for="dispatch-proof">Dispatch Proof Photo</label>
+              <input id="dispatch-proof" type="file" accept="image/*" />
+            </div>
           </div>
           <div id="dispatch-status" class="status" role="status" aria-live="polite"></div>
         </div>
@@ -78,9 +82,11 @@
       const dispatchBody = document.getElementById("dispatch-body");
       const dispatchQcName = document.getElementById("dispatch-qc-name");
       const dispatchQcDate = document.getElementById("dispatch-qc-date");
+      const dispatchProof = document.getElementById("dispatch-proof");
       const dispatchStatus = document.getElementById("dispatch-status");
       const dispatchSubmit = document.getElementById("dispatch-submit");
       const rejectedLogKey = "final_good_rejected_log";
+      const dispatchQcLogKey = "dispatch_qc_log";
       let activeDispatchOrder = null;
       let activeDispatchLines = [];
 
@@ -195,6 +201,7 @@
         document.body.classList.remove("qc-open");
         dispatchQcName.value = "";
         dispatchQcDate.value = "";
+        dispatchProof.value = "";
         setDispatchStatus("");
       };
 
@@ -204,6 +211,10 @@
         const qcDate = dispatchQcDate.value;
         if (!qcName || !qcDate) {
           setDispatchStatus("QC name and date are required.", "error");
+          return;
+        }
+        if (!dispatchProof.files || !dispatchProof.files[0]) {
+          setDispatchStatus("Dispatch proof photo is required.", "error");
           return;
         }
 
@@ -247,6 +258,23 @@
         };
 
         try {
+          if (dispatchProof.files && dispatchProof.files[0]) {
+            const formData = new FormData();
+            formData.append("file", dispatchProof.files[0]);
+            const uploadRes = await fetch("/api/media/upload?kind=dispatch", {
+              method: "POST",
+              body: formData,
+            });
+            if (!uploadRes.ok) {
+              const detail = await uploadRes.json().catch(() => ({}));
+              throw new Error(detail.detail || "Unable to upload dispatch proof");
+            }
+            const uploadData = await uploadRes.json();
+            payload.proof_public_id = uploadData.public_id;
+            payload.proof_version = "";
+            payload.proof_format = "";
+          }
+
           const itemsRes = await fetch("/api/items");
           if (!itemsRes.ok) throw new Error("Unable to load inventory");
           const items = await itemsRes.json();
@@ -290,10 +318,31 @@
                 qty: rejected,
                 qc: qcName,
                 date: qcDate,
+                proof_public_id: payload.proof_public_id || "",
               });
             }
           });
           localStorage.setItem(rejectedLogKey, JSON.stringify(rejectedLog));
+
+          let qcLog = [];
+          try {
+            const raw = localStorage.getItem(dispatchQcLogKey);
+            qcLog = raw ? JSON.parse(raw) : [];
+          } catch (error) {
+            qcLog = [];
+          }
+          qcLog.unshift({
+            id: crypto.randomUUID(),
+            order_id: activeDispatchOrder.id,
+            qc: qcName,
+            date: qcDate,
+            rejected_qty: activeDispatchLines.reduce(
+              (sum, line) => sum + Number(line.rejected || 0),
+              0
+            ),
+            proof_public_id: payload.proof_public_id || "",
+          });
+          localStorage.setItem(dispatchQcLogKey, JSON.stringify(qcLog));
 
           closeDispatchModal();
           await fetchOrders();

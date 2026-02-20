@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,8 +10,10 @@ from sqlmodel import Session
 from app.db import init_db, engine
 from app.routers import (
     assembly,
+    backups,
     customers,
     inventory,
+    media,
     packaging,
     production,
     purchase_orders,
@@ -25,10 +29,27 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 templates = Jinja2Templates(directory="app/templates")
 
+_scheduler = None
+
 
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    enable_backup = os.getenv("ENABLE_DAILY_BACKUP", "false").lower() == "true"
+    if enable_backup:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        def _run_backup_job():
+            from app.backups import run_backup
+
+            with Session(engine) as session:
+                run_backup(session)
+
+        global _scheduler
+        if _scheduler is None:
+            _scheduler = BackgroundScheduler(daemon=True)
+            _scheduler.add_job(_run_backup_job, "interval", days=1)
+            _scheduler.start()
 
 
 @app.get("/")
@@ -154,4 +175,6 @@ app.include_router(vendors.router)
 app.include_router(sales_orders.router)
 app.include_router(purchase_orders.router)
 app.include_router(reports.router)
+app.include_router(media.router)
+app.include_router(backups.router)
 app.include_router(auth_router)

@@ -72,6 +72,64 @@
           </table>
         </div>
       </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Monthly Report</h2>
+            <p class="hint" id="monthly-range">Last 30 days</p>
+          </div>
+          <button class="ghost" id="refresh-monthly" type="button" data-readonly-allow="true">
+            Refresh
+          </button>
+        </div>
+        <div id="monthly-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table class="table" id="monthly-table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Item Name</th>
+                <th>Planned</th>
+                <th>Produced</th>
+                <th>Rejected</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-header">
+          <div>
+            <h2>Performance Summary</h2>
+            <p class="hint" id="summary-range">Weekly totals</p>
+          </div>
+          <div class="filters">
+            <select id="summary-range-select" data-readonly-allow="true">
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <button class="ghost" id="refresh-summary" type="button" data-readonly-allow="true">
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div id="summary-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table class="table" id="summary-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <script src="/static/permissions.js"></script>
@@ -134,10 +192,17 @@
 
       const dailyTable = document.getElementById("daily-table");
       const weeklyTable = document.getElementById("weekly-table");
+      const monthlyTable = document.getElementById("monthly-table");
       const dailyStatus = document.getElementById("daily-status");
       const weeklyStatus = document.getElementById("weekly-status");
+      const monthlyStatus = document.getElementById("monthly-status");
+      const summaryStatus = document.getElementById("summary-status");
       const dailyRange = document.getElementById("daily-range");
       const weeklyRange = document.getElementById("weekly-range");
+      const monthlyRange = document.getElementById("monthly-range");
+      const summaryRange = document.getElementById("summary-range");
+      const summaryTable = document.getElementById("summary-table");
+      const summaryRangeSelect = document.getElementById("summary-range-select");
 
       document
         .getElementById("refresh-daily")
@@ -149,9 +214,65 @@
         .addEventListener("click", () =>
           loadReport("weekly", weeklyTable, weeklyStatus, weeklyRange)
         );
+      document
+        .getElementById("refresh-monthly")
+        .addEventListener("click", () =>
+          loadReport("monthly", monthlyTable, monthlyStatus, monthlyRange)
+        );
+
+      const loadSummary = async (range) => {
+        summaryStatus.textContent = "";
+        try {
+          const response = await fetch(`/api/reports/summary?range=${range}`);
+          if (!response.ok) throw new Error("Failed");
+          const data = await response.json();
+
+          let usageTotal = 0;
+          try {
+            const raw = localStorage.getItem("raw_material_usage_log");
+            const entries = raw ? JSON.parse(raw) : [];
+            const start = new Date(data.start).getTime();
+            const end = new Date(data.end).getTime();
+            usageTotal = entries
+              .filter((entry) => {
+                const stamp = new Date(entry.date || entry.used_at || entry.timestamp || 0).getTime();
+                return stamp >= start && stamp <= end;
+              })
+              .reduce((sum, entry) => sum + Number(entry.qty || entry.quantity || 0), 0);
+          } catch (err) {
+            usageTotal = 0;
+          }
+
+          const body = summaryTable.querySelector("tbody");
+          body.innerHTML = "";
+          const rows = [
+            ["Produced", data.produced],
+            ["Sales (Dispatched)", data.dispatched],
+            ["Rejection %", `${data.rejection_rate}%`],
+            ["Raw Material Usage", usageTotal],
+          ];
+          rows.forEach(([label, value]) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td>${label}</td><td>${value}</td>`;
+            body.appendChild(tr);
+          });
+          summaryRange.textContent = formatRange(data.start, data.end);
+        } catch (err) {
+          summaryStatus.textContent = "Unable to load summary.";
+          summaryStatus.dataset.type = "error";
+          summaryStatus.classList.add("visible");
+        }
+      };
+
+      document
+        .getElementById("refresh-summary")
+        .addEventListener("click", () => loadSummary(summaryRangeSelect.value));
+      summaryRangeSelect.addEventListener("change", () => loadSummary(summaryRangeSelect.value));
 
       loadReport("daily", dailyTable, dailyStatus, dailyRange);
       loadReport("weekly", weeklyTable, weeklyStatus, weeklyRange);
+      loadReport("monthly", monthlyTable, monthlyStatus, monthlyRange);
+      loadSummary(summaryRangeSelect.value);
     </script>
   </body>
 </html>

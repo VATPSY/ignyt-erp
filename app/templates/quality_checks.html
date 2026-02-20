@@ -25,11 +25,13 @@
             <p class="hint">Assembly line first part checks.</p>
           </div>
         </div>
-        <div class="table" role="table" aria-label="First part check logs">
+        <div class="table qc-first-table" role="table" aria-label="First part check logs">
           <div class="table-row table-head" role="row">
             <span>SKU</span>
             <span>Item</span>
             <span>Status</span>
+            <span>QC By</span>
+            <span>Photo</span>
             <span>Date</span>
           </div>
           <div id="first-part-body" class="table-body" role="rowgroup"></div>
@@ -61,11 +63,12 @@
             <p class="hint">Rejected pieces captured during dispatch QC.</p>
           </div>
         </div>
-        <div class="table" role="table" aria-label="Dispatch QC logs">
+        <div class="table qc-dispatch-table" role="table" aria-label="Dispatch QC logs">
           <div class="table-row table-head" role="row">
-            <span>Item</span>
+            <span>Order</span>
             <span>Rejected Qty</span>
             <span>QC By</span>
+            <span>Photo</span>
             <span>Date</span>
           </div>
           <div id="dispatch-qc-body" class="table-body" role="rowgroup"></div>
@@ -78,7 +81,7 @@
     <script>
       const firstPartKey = "first_part_qc_log";
       const rawRejectedKey = "raw_material_rejected_log";
-      const dispatchRejectedKey = "final_good_rejected_log";
+      const dispatchQcKey = "dispatch_qc_log";
 
       const firstPartBody = document.getElementById("first-part-body");
       const rawQcBody = document.getElementById("raw-qc-body");
@@ -105,6 +108,27 @@
           row.style.animationDelay = `${index * 40}ms`;
 
           columns.forEach((col) => {
+            if (col === "__photo") {
+              const wrap = document.createElement("div");
+              wrap.className = "actions";
+              if (entry.proof_public_id) {
+                const img = document.createElement("img");
+                img.className = "qc-thumb";
+                fetch(`/api/media/signed-url?public_id=${encodeURIComponent(entry.proof_public_id)}`)
+                  .then((res) => res.json())
+                  .then((data) => {
+                    img.src = data.url;
+                  });
+                wrap.appendChild(img);
+              } else {
+                const empty = document.createElement("span");
+                empty.className = "hint";
+                empty.textContent = "No photo";
+                wrap.appendChild(empty);
+              }
+              row.appendChild(wrap);
+              return;
+            }
             const value = entry[col] ?? "";
             const cell = document.createElement("input");
             cell.value = value;
@@ -120,6 +144,8 @@
         "sku",
         "item",
         "status",
+        "qc",
+        "__photo",
         "date",
       ]);
       renderLog(rawRejectedKey, rawQcBody, "No raw material QC logs yet.", [
@@ -128,10 +154,11 @@
         "qc_by",
         "date",
       ]);
-      renderLog(dispatchRejectedKey, dispatchQcBody, "No dispatch QC logs yet.", [
-        "name",
-        "qty",
+      renderLog(dispatchQcKey, dispatchQcBody, "No dispatch QC logs yet.", [
+        "order_id",
+        "rejected_qty",
         "qc",
+        "__photo",
         "date",
       ]);
     </script>

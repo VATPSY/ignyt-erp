@@ -275,6 +275,14 @@ body.read-only .ghost {
   grid-template-columns: 1fr 1.6fr 1fr 1fr 1fr;
 }
 
+.qc-first-table .table-row {
+  grid-template-columns: 1fr 1.4fr 0.9fr 1fr 0.9fr 1.2fr;
+}
+
+.qc-dispatch-table .table-row {
+  grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr;
+}
+
 body.qc-open {
   overflow: hidden;
 }
@@ -597,6 +605,10 @@ body.qc-open .page {
   animation: fadeUp 0.35s ease both;
 }
 
+.assembly-table .table-row {
+  grid-template-columns: 1fr 1.4fr 1fr 0.9fr 0.9fr 1.2fr 1fr;
+}
+
 .table-row:hover {
   background: #f3efe8;
   border-color: rgba(31, 29, 27, 0.18);
@@ -655,6 +667,15 @@ body.qc-open .page {
   color: #236246;
   font-size: 12px;
   font-weight: 600;
+}
+
+.qc-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fffaf6;
 }
 
 .table-row.low-stock .badge {

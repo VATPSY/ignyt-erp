@@ -29,12 +29,14 @@
           <button class="ghost" id="refresh" type="button" data-readonly-allow="true">Refresh</button>
         </div>
         <div id="assembly-status" class="status" role="status" aria-live="polite"></div>
-        <div class="table" role="table" aria-label="Assembly queue">
+        <div class="table assembly-table" role="table" aria-label="Assembly queue">
           <div class="table-row table-head" role="row">
             <span role="columnheader">SKU</span>
             <span role="columnheader">Item Name</span>
             <span role="columnheader">Assembled / Total</span>
             <span role="columnheader">First Part Check</span>
+            <span role="columnheader">QC Name</span>
+            <span role="columnheader">QC Photo</span>
             <span role="columnheader">Actions</span>
           </div>
           <div id="assembly-body" class="table-body" role="rowgroup"></div>
@@ -116,6 +118,21 @@
           checkBox.checked = row.first_part_checked || false;
           checkCell.appendChild(checkBox);
 
+          const qcCell = document.createElement("div");
+          qcCell.className = "actions";
+          const qcNameInput = document.createElement("input");
+          qcNameInput.type = "text";
+          qcNameInput.placeholder = "QC Name";
+          qcNameInput.value = row.qc_name || "";
+          qcCell.appendChild(qcNameInput);
+
+          const photoCell = document.createElement("div");
+          photoCell.className = "actions";
+          const photoInput = document.createElement("input");
+          photoInput.type = "file";
+          photoInput.accept = "image/*";
+          photoCell.appendChild(photoInput);
+
           const actionCell = document.createElement("div");
           actionCell.className = "actions";
           const statusSelect = document.createElement("select");
@@ -137,7 +154,28 @@
               setStatus("Complete first part checking before updating.", "error");
               return;
             }
+            const qcName = qcNameInput.value.trim();
+            if (!qcName) {
+              setStatus("QC name is required for first part check.", "error");
+              return;
+            }
+            if (!photoInput.files || !photoInput.files[0]) {
+              setStatus("Upload a QC photo before updating.", "error");
+              return;
+            }
             try {
+              const formData = new FormData();
+              formData.append("file", photoInput.files[0]);
+              const uploadRes = await fetch("/api/media/upload?kind=first_part", {
+                method: "POST",
+                body: formData,
+              });
+              if (!uploadRes.ok) {
+                const detail = await uploadRes.json().catch(() => ({}));
+                throw new Error(detail.detail || "Unable to upload QC photo");
+              }
+              const uploadData = await uploadRes.json();
+
               const raw = localStorage.getItem(firstPartKey);
               const log = raw ? JSON.parse(raw) : [];
               log.unshift({
@@ -145,6 +183,8 @@
                 item: row.item_name,
                 status: "Checked",
                 date: new Date().toLocaleString(),
+                qc: qcName,
+                proof_public_id: uploadData.public_id,
               });
               localStorage.setItem(firstPartKey, JSON.stringify(log));
 
@@ -174,6 +214,8 @@
           rowEl.appendChild(nameCell);
           rowEl.appendChild(qtyWrap);
           rowEl.appendChild(checkCell);
+          rowEl.appendChild(qcCell);
+          rowEl.appendChild(photoCell);
           rowEl.appendChild(actionCell);
           bodyEl.appendChild(rowEl);
         });

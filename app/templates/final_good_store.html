@@ -354,10 +354,13 @@
       const parseCsv = (text) => {
         const lines = text.split(/\r?\n/).filter((line) => line.trim().length);
         if (!lines.length) return [];
-        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+        const delimiter = lines[0].includes("\t") ? "\t" : ",";
+        const headers = lines[0]
+          .split(delimiter)
+          .map((h) => h.trim().toLowerCase().replace(/\s+/g, "_"));
         const rows = [];
         for (let i = 1; i < lines.length; i += 1) {
-          const cols = lines[i].split(",").map((c) => c.trim());
+          const cols = lines[i].split(delimiter).map((c) => c.trim());
           const row = {};
           headers.forEach((h, idx) => {
             row[h] = cols[idx] ?? "";
@@ -474,15 +477,23 @@
         try {
           const existing = await fetch("/api/items").then((res) => res.json());
           const bySku = new Map(existing.map((item) => [item.sku, item]));
+          let created = 0;
+          let updated = 0;
+          let skipped = 0;
+          const skippedRows = [];
           for (const row of rows) {
-            const sku = row.sku?.trim();
-            const name = row.name?.trim();
-            if (!sku || !name) continue;
+            const sku = String(row.sku || "").trim();
+            const name = String(row.name || row.item_name || "").trim();
+            if (!sku || !name) {
+              skipped += 1;
+              skippedRows.push({ sku, name, reason: "Missing SKU or Name" });
+              continue;
+            }
             const payload = {
               sku,
               name,
               quantity: Number(row.quantity || 0),
-              reorder_level: Number(row.reorder_level || 0),
+              reorder_level: Number(row.reorder_level || row.reorder_value || 0),
               unit: "pcs",
               active: true,
             };
@@ -493,16 +504,22 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
               });
+              updated += 1;
             } else {
               await fetch("/api/items", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
               });
+              created += 1;
             }
           }
           await fetchItems();
-          setImportStatus("Import complete.", "success");
+          const summary = `Import complete. Created ${created}, Updated ${updated}, Skipped ${skipped}.`;
+          if (skipped > 0) {
+            console.table(skippedRows.slice(0, 20));
+          }
+          setImportStatus(summary, "success");
           setTimeout(() => setImportStatus(""), 1500);
         } catch (error) {
           setImportStatus("Import failed.", "error");
